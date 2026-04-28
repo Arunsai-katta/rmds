@@ -28,11 +28,13 @@ export interface EMRClient {
   id: string;
   name: string;
   connectionType: "api" | "sftp";
+  apiUrl?: string;
   authToken?: string;
   sftpHost?: string;
   sftpPort?: string;
   sftpUser?: string;
   sftpPass?: string;
+  sftpFolder?: string;
 }
 
 export interface ParsedPDFResult {

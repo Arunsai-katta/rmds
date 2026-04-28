@@ -1,12 +1,92 @@
 [
-  { "id": "prov-001", "name": "Vera Arrington NP", "npi": "1881167112", "credential": "NP", "firstName": "VERA", "lastName": "ARRINGTON", "practiceGroup": "Reliance" },
-  { "id": "prov-002", "name": "Seleina Kirorei NP", "npi": "1427390442", "credential": "NP", "firstName": "SELEINA", "lastName": "KIROREI", "practiceGroup": "KHS Geriatrics" },
-  { "id": "prov-003", "name": "Priscilla Boahemaa NP", "npi": "1598125718", "credential": "NP", "firstName": "PRISCILLA", "lastName": "BOAHEMAA", "practiceGroup": "KHS Geriatrics" },
-  { "id": "prov-004", "name": "Chidiogo Ebenmelu NP", "npi": "1306318712", "credential": "NP", "firstName": "CHIDIOGO", "lastName": "EBENMELU", "practiceGroup": "KHS Geriatrics" },
-  { "id": "prov-011", "name": "Bharat Latthe MD", "npi": "1922050186", "credential": "MD", "firstName": "BHARAT", "lastName": "LATTHE", "practiceGroup": "Reliance" },
-  { "id": "prov-012", "name": "Mercy Gathogo NP", "npi": "1235592536", "credential": "NP", "firstName": "MERCY", "lastName": "GATHOGO", "practiceGroup": "Mercy Gathogo" },
-  { "id": "prov-013", "name": "Kwanei Holloway NP", "npi": "1972345213", "credential": "NP", "firstName": "KWANEI", "lastName": "HOLLOWAY", "practiceGroup": "KJ Cares" },
-  { "id": "prov-018", "name": "Khoa Nguyen MD", "npi": "1437146966", "credential": "MD", "firstName": "KHOA", "lastName": "NGUYEN", "practiceGroup": "Houston Family Physicians" },
-  { "id": "prov-019", "name": "Adeeba Akhtar MD", "npi": "1447264429", "credential": "MD", "firstName": "ADEEBA", "lastName": "AKHTAR", "practiceGroup": "Texas Family and Geriatric Clinic" },
-  { "id": "prov-020", "name": "Bhaviniben Patel MD", "npi": "1437491727", "credential": "MD", "firstName": "BHAVINIBEN", "lastName": "PATEL", "practiceGroup": "A to Z Med" }
+  {
+    "id": "prov-001",
+    "name": "Vera Arrington NP",
+    "npi": "1881167112",
+    "credential": "NP",
+    "firstName": "VERA",
+    "lastName": "ARRINGTON",
+    "practiceGroup": "Reliance"
+  },
+  {
+    "id": "prov-002",
+    "name": "Seleina Kirorei NP",
+    "npi": "1427390442",
+    "credential": "NP",
+    "firstName": "SELEINA",
+    "lastName": "KIROREI",
+    "practiceGroup": "KHS Geriatrics"
+  },
+  {
+    "id": "prov-003",
+    "name": "Priscilla Boahemaa NP",
+    "npi": "1598125718",
+    "credential": "NP",
+    "firstName": "PRISCILLA",
+    "lastName": "BOAHEMAA",
+    "practiceGroup": "KHS Geriatrics"
+  },
+  {
+    "id": "prov-004",
+    "name": "Chidiogo Ebenmelu NP",
+    "npi": "1306318712",
+    "credential": "NP",
+    "firstName": "CHIDIOGO",
+    "lastName": "EBENMELU",
+    "practiceGroup": "KHS Geriatrics"
+  },
+  {
+    "id": "prov-011",
+    "name": "Bharat Latthe MD",
+    "npi": "1922050186",
+    "credential": "MD",
+    "firstName": "BHARAT",
+    "lastName": "LATTHE",
+    "practiceGroup": "Reliance"
+  },
+  {
+    "id": "prov-012",
+    "name": "Mercy Gathogo NP",
+    "npi": "1235592536",
+    "credential": "NP",
+    "firstName": "MERCY",
+    "lastName": "GATHOGO",
+    "practiceGroup": "Mercy Gathogo"
+  },
+  {
+    "id": "prov-013",
+    "name": "Kwanei Holloway NP",
+    "npi": "1972345213",
+    "credential": "NP",
+    "firstName": "KWANEI",
+    "lastName": "HOLLOWAY",
+    "practiceGroup": "KJ Cares"
+  },
+  {
+    "id": "prov-018",
+    "name": "Khoa Nguyen MD",
+    "npi": "1437146966",
+    "credential": "MD",
+    "firstName": "KHOA",
+    "lastName": "NGUYEN",
+    "practiceGroup": "Houston Family Physicians"
+  },
+  {
+    "id": "prov-019",
+    "name": "Adeeba Akhtar MD",
+    "npi": "1447264429",
+    "credential": "MD",
+    "firstName": "ADEEBA",
+    "lastName": "AKHTAR",
+    "practiceGroup": "Texas Family and Geriatric Clinic"
+  },
+  {
+    "id": "prov-020",
+    "name": "Bhaviniben Patel MD",
+    "npi": "1437491727",
+    "credential": "MD",
+    "firstName": "BHAVINIBEN",
+    "lastName": "PATEL",
+    "practiceGroup": "A to Z Med"
+  }
 ]

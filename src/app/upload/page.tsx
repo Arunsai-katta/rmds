@@ -50,12 +50,19 @@ export default function UploadPage() {
         const data = await res.json();
         
         if (data.results && data.results.length > 0) {
-          newResults.push(data.results[0]);
+          const newRes = data.results[0];
+          newResults.push(newRes);
           setFiles(prev => {
             const next = [...prev];
             next[i].status = "done";
             return next;
           });
+
+          // Automatically save to sessionStorage
+          const existing = sessionStorage.getItem("parsedResults");
+          let allResults = existing ? JSON.parse(existing) : [];
+          allResults.push(newRes);
+          sessionStorage.setItem("parsedResults", JSON.stringify(allResults));
         } else {
           throw new Error("Parse failed");
         }
@@ -77,16 +84,8 @@ export default function UploadPage() {
   };
 
   const saveAndContinue = () => {
-    // Append to existing session storage
-    const existing = sessionStorage.getItem("parsedResults");
-    let allResults = [];
-    if (existing) {
-      allResults = JSON.parse(existing);
-    }
-    allResults = [...allResults, ...results];
-    sessionStorage.setItem("parsedResults", JSON.stringify(allResults));
-    
-    showToast("Results saved! Navigating to review...");
+    // Already saved to session storage during parse
+    showToast("Navigating to review...");
     router.push("/results");
   };
 

@@ -30,9 +30,11 @@ export async function POST(req: NextRequest) {
 
     let connMsg = "";
     if (client.connectionType === "sftp") {
-       connMsg = `Simulated SFTP upload to ${client.sftpUser}@${client.sftpHost}:${client.sftpPort}`;
+       const folder = client.sftpFolder || "/";
+       connMsg = `Simulated SFTP upload to ${client.sftpUser}@${client.sftpHost}:${client.sftpPort} at folder ${folder}`;
     } else {
-       connMsg = `Simulated API push with auth token ${client.authToken ? "********" : "None"}`;
+       const url = client.apiUrl || "unknown endpoint";
+       connMsg = `Simulated API push to ${url} with auth token ${client.authToken ? "********" : "None"}`;
     }
 
     return NextResponse.json({ 

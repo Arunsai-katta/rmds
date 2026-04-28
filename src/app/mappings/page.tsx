@@ -257,7 +257,18 @@ export default function MappingDataPage() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Practice Group</label>
-                  <input className="form-input" value={formData.practiceGroup || ""} onChange={(e) => setFormData({...formData, practiceGroup: e.target.value})} />
+                  <input 
+                    className="form-input" 
+                    list="practice-groups" 
+                    value={formData.practiceGroup || ""} 
+                    onChange={(e) => setFormData({...formData, practiceGroup: e.target.value})} 
+                    placeholder="Select or type new group..."
+                  />
+                  <datalist id="practice-groups">
+                    {Array.from(new Set(providers.map(p => p.practiceGroup).filter(Boolean))).map(group => (
+                      <option key={group} value={group} />
+                    ))}
+                  </datalist>
                 </div>
               </>
             )}
@@ -349,10 +360,18 @@ export default function MappingDataPage() {
                         <input className="form-input" type="password" value={formData.sftpPass || ""} onChange={(e) => setFormData({...formData, sftpPass: e.target.value})} />
                       </div>
                     </div>
+                    <div className="form-group mt-2">
+                      <label className="form-label">Upload Folder (Path)</label>
+                      <input className="form-input" value={formData.sftpFolder || ""} placeholder="/upload/results" onChange={(e) => setFormData({...formData, sftpFolder: e.target.value})} />
+                    </div>
                   </div>
                 ) : (
                   <div className="card mt-4" style={{ padding: 16 }}>
                     <h4 style={{ marginBottom: 12, fontSize: 13, fontWeight: 600 }}>API Configuration</h4>
+                    <div className="form-group">
+                      <label className="form-label">Endpoint URL</label>
+                      <input className="form-input" value={formData.apiUrl || ""} placeholder="https://api.emr.com/v1/results" onChange={(e) => setFormData({...formData, apiUrl: e.target.value})} />
+                    </div>
                     <div className="form-group">
                       <label className="form-label">Auth Token</label>
                       <input className="form-input" value={formData.authToken || ""} onChange={(e) => setFormData({...formData, authToken: e.target.value})} />

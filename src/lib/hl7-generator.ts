@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { ParsedPDFResult } from "./types";
+import fs from "fs";
+import path from "path";
 
 function formatHL7Timestamp(date?: Date): string {
   const d = date || new Date();
@@ -128,16 +130,18 @@ export async function buildHL7FromParsedResult(
 ): Promise<string> {
   let facility = null;
   try {
-    const res = await fetch("http://localhost:3000/api/facilities");
-    if (res.ok) {
-      const facilities: any[] = await res.json();
+    const facilitiesPath = path.join(process.cwd(), "src", "data", "facilities.json");
+    if (fs.existsSync(facilitiesPath)) {
+      const facilities: any[] = JSON.parse(fs.readFileSync(facilitiesPath, "utf-8"));
       facility = facilities.find(
         (f) =>
           f.companyId === (overrides?.facilityCompanyId || parsed.facilityId) ||
           f.name === (overrides?.facilityName || parsed.facilityName)
       );
     }
-  } catch(e) {}
+  } catch(e) {
+    console.error("Error reading facilities.json:", e);
+  }
 
   const input: HL7GeneratorInput = {
     patientLastName: parsed.patientLastName,
