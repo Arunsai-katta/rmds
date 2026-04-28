@@ -1,0 +1,22 @@
+[
+  { "id": "map-001", "providerId": "prov-001", "facilityId": "fac-001" },
+  { "id": "map-002", "providerId": "prov-002", "facilityId": "fac-003" },
+  { "id": "map-003", "providerId": "prov-003", "facilityId": "fac-003" },
+  { "id": "map-004", "providerId": "prov-004", "facilityId": "fac-003" },
+  { "id": "map-005", "providerId": "prov-005", "facilityId": "fac-003" },
+  { "id": "map-006", "providerId": "prov-006", "facilityId": "fac-003" },
+  { "id": "map-007", "providerId": "prov-007", "facilityId": "fac-003" },
+  { "id": "map-008", "providerId": "prov-008", "facilityId": "fac-003" },
+  { "id": "map-009", "providerId": "prov-009", "facilityId": "fac-003" },
+  { "id": "map-010", "providerId": "prov-010", "facilityId": "fac-003" },
+  { "id": "map-011", "providerId": "prov-011", "facilityId": "fac-001" },
+  { "id": "map-012", "providerId": "prov-012", "facilityId": "fac-004" },
+  { "id": "map-013", "providerId": "prov-013", "facilityId": "fac-005" },
+  { "id": "map-014", "providerId": "prov-014", "facilityId": "fac-005" },
+  { "id": "map-015", "providerId": "prov-015", "facilityId": "fac-005" },
+  { "id": "map-016", "providerId": "prov-016", "facilityId": "fac-005" },
+  { "id": "map-017", "providerId": "prov-017", "facilityId": "fac-005" },
+  { "id": "map-018", "providerId": "prov-018", "facilityId": "fac-006" },
+  { "id": "map-019", "providerId": "prov-019", "facilityId": "fac-008" },
+  { "id": "map-020", "providerId": "prov-020", "facilityId": "fac-007" }
+]
