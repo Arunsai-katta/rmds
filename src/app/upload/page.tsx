@@ -1,15 +1,16 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { ParsedPDFResult } from "@/lib/types";
 
 export default function UploadPage() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [parsing, setParsing] = useState(false);
+  const [files, setFiles] = useState<{ file: File; status: "pending" | "uploading" | "done" | "error" }[]>([]);
   const [results, setResults] = useState<ParsedPDFResult[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
 
   const showToast = (msg: string, type = "success") => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 3000);
@@ -17,37 +18,77 @@ export default function UploadPage() {
 
   const handleFiles = (newFiles: FileList | null) => {
     if (!newFiles) return;
-    const pdfs = Array.from(newFiles).filter((f) => f.type === "application/pdf");
+    const pdfs = Array.from(newFiles)
+      .filter((f) => f.type === "application/pdf")
+      .map(file => ({ file, status: "pending" as const }));
     if (pdfs.length === 0) { showToast("Please select PDF files only", "error"); return; }
     setFiles((prev) => [...prev, ...pdfs]);
   };
 
   const removeFile = (idx: number) => setFiles((prev) => prev.filter((_, i) => i !== idx));
 
-  const handleParse = async () => {
-    if (files.length === 0) return;
-    setParsing(true);
-    try {
-      const formData = new FormData();
-      files.forEach((f) => formData.append("files", f));
-      const res = await fetch("/api/parse-pdf", { method: "POST", body: formData });
-      const data = await res.json();
-      if (data.results) {
-        setResults(data.results);
-        showToast(`Parsed ${data.results.length} file(s) successfully`);
+  const handleParseAll = async () => {
+    const pending = files.filter(f => f.status === "pending" || f.status === "error");
+    if (pending.length === 0) return;
+
+    const newResults: ParsedPDFResult[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].status !== "pending" && files[i].status !== "error") continue;
+      
+      // Update status to uploading
+      setFiles(prev => {
+        const next = [...prev];
+        next[i].status = "uploading";
+        return next;
+      });
+
+      try {
+        const formData = new FormData();
+        formData.append("files", files[i].file);
+        const res = await fetch("/api/parse-pdf", { method: "POST", body: formData });
+        const data = await res.json();
+        
+        if (data.results && data.results.length > 0) {
+          newResults.push(data.results[0]);
+          setFiles(prev => {
+            const next = [...prev];
+            next[i].status = "done";
+            return next;
+          });
+        } else {
+          throw new Error("Parse failed");
+        }
+      } catch (e) {
+        setFiles(prev => {
+          const next = [...prev];
+          next[i].status = "error";
+          return next;
+        });
       }
-    } catch {
-      showToast("Failed to parse PDFs", "error");
     }
-    setParsing(false);
+
+    if (newResults.length > 0) {
+      setResults(prev => [...prev, ...newResults]);
+      // Remove successfully processed files from UI
+      setFiles(prev => prev.filter(f => f.status !== "done"));
+      showToast(`Parsed ${newResults.length} file(s) successfully`);
+    }
   };
 
-  const saveToSession = () => {
-    sessionStorage.setItem("parsedResults", JSON.stringify(results));
-    showToast("Results saved — go to Results & Send page");
+  const saveAndContinue = () => {
+    // Append to existing session storage
+    const existing = sessionStorage.getItem("parsedResults");
+    let allResults = [];
+    if (existing) {
+      allResults = JSON.parse(existing);
+    }
+    allResults = [...allResults, ...results];
+    sessionStorage.setItem("parsedResults", JSON.stringify(allResults));
+    
+    showToast("Results saved! Navigating to review...");
+    router.push("/results");
   };
-
-  const confPercent = (c: number) => c >= 80 ? "badge-success" : c >= 50 ? "badge-warning" : "badge-danger";
 
   return (
     <>
@@ -56,7 +97,6 @@ export default function UploadPage() {
         <p>Upload diagnostic result PDFs to parse and generate HL7 messages</p>
       </div>
       <div className="page-body">
-        {/* Dropzone */}
         <div
           className={`dropzone ${dragActive ? "active" : ""}`}
           onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
@@ -67,63 +107,48 @@ export default function UploadPage() {
         >
           <div className="dropzone-icon">📂</div>
           <div className="dropzone-text">Drop PDF files here or click to browse</div>
-          <div className="dropzone-sub">Supports RMDS diagnostic report PDFs (X-Ray, Ultrasound, Echo, etc.)</div>
-          <input ref={inputRef} type="file" accept=".pdf" multiple hidden onChange={(e) => handleFiles(e.target.files)} id="pdf-input" />
+          <div className="dropzone-sub">Upload single or multiple PDF reports</div>
+          <input ref={inputRef} type="file" accept=".pdf" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
         </div>
 
-        {/* File list */}
+        {/* File Queue */}
         {files.length > 0 && (
           <div className="card mt-4">
             <div className="flex items-center justify-between mb-4">
-              <h3 style={{ fontSize: 15, fontWeight: 700 }}>Selected Files ({files.length})</h3>
+              <h3 style={{ fontSize: 15, fontWeight: 700 }}>File Queue ({files.length})</h3>
               <div className="flex gap-2">
-                <button className="btn btn-danger btn-sm" onClick={() => setFiles([])}>Clear All</button>
-                <button className="btn btn-primary" onClick={handleParse} disabled={parsing} id="parse-btn">
-                  {parsing ? <><span className="loading-spinner" /> Parsing...</> : "🔍 Parse PDFs"}
-                </button>
+                <button className="btn btn-danger btn-sm" onClick={() => setFiles([])}>Clear</button>
+                <button className="btn btn-primary" onClick={handleParseAll}>Process Files</button>
               </div>
             </div>
             {files.map((f, i) => (
               <div key={i} className="flex items-center justify-between" style={{ padding: "8px 0", borderBottom: "1px solid var(--border-color)" }}>
-                <span className="text-sm">📄 {f.name} <span className="text-muted text-xs">({(f.size / 1024).toFixed(0)} KB)</span></span>
-                <button className="btn btn-danger btn-sm btn-icon" onClick={() => removeFile(i)}>✕</button>
+                <span className="text-sm flex items-center gap-2">
+                  📄 {f.file.name} 
+                  {f.status === "uploading" && <span className="loading-spinner" style={{width: 14, height: 14}}/>}
+                  {f.status === "error" && <span className="text-danger text-xs">(Failed)</span>}
+                </span>
+                {f.status !== "uploading" && (
+                  <button className="btn btn-danger btn-sm btn-icon" onClick={() => removeFile(i)}>✕</button>
+                )}
               </div>
             ))}
           </div>
         )}
 
-        {/* Parsed results */}
+        {/* Parsed Ready to Save */}
         {results.length > 0 && (
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 style={{ fontSize: 16, fontWeight: 700 }}>Parsed Results</h3>
-              <button className="btn btn-success" onClick={saveToSession} id="save-results-btn">
-                💾 Save & Continue to Review
-              </button>
-            </div>
-            <div className="card-grid card-grid-2">
-              {results.map((r) => (
-                <div key={r.id} className="card">
-                  <div className="flex items-center justify-between mb-4">
-                    <span style={{ fontSize: 13, fontWeight: 600 }} className="truncate">{r.fileName}</span>
-                    <span className={`badge ${confPercent(r.confidence)}`}>{r.confidence}% conf</span>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 16px", fontSize: 13 }}>
-                    <div><span className="text-muted text-xs">Patient</span><br /><strong>{r.patientLastName}, {r.patientFirstName}</strong></div>
-                    <div><span className="text-muted text-xs">DOB</span><br />{r.patientDOB || "—"}</div>
-                    <div><span className="text-muted text-xs">Ref Physician</span><br />{r.referringPhysicianName || "—"}</div>
-                    <div><span className="text-muted text-xs">NPI</span><br /><code style={{ fontSize: 11 }}>{r.referringPhysicianNPI || "Not found"}</code></div>
-                    <div><span className="text-muted text-xs">Facility</span><br />{r.facilityName || "—"}</div>
-                    <div><span className="text-muted text-xs">Exam Date</span><br />{r.examDate || "—"}</div>
-                    <div style={{ gridColumn: "1/-1" }}><span className="text-muted text-xs">Test / Study</span><br />{r.testName || "—"} {r.cptCode && <span className="badge badge-accent">{r.cptCode}</span>}</div>
-                  </div>
-                </div>
-              ))}
+          <div className="card mt-4" style={{ borderColor: "var(--success)", background: "rgba(16,185,129,0.05)" }}>
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 style={{ fontWeight: 700, color: "var(--success)" }}>{results.length} Files Ready</h3>
+                <p className="text-sm text-muted">Files have been parsed successfully.</p>
+              </div>
+              <button className="btn btn-success" onClick={saveAndContinue}>Go to Send Results 🚀</button>
             </div>
           </div>
         )}
       </div>
-
       {toast && <div className="toast-container"><div className={`toast toast-${toast.type}`}>{toast.msg}</div></div>}
     </>
   );

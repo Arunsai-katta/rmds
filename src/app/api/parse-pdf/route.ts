@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
         const pdfData = await pdf(buffer);
         const pdfBase64 = buffer.toString("base64");
 
-        const parsed = buildParsedPDFResult(
+        const parsed = await buildParsedPDFResult(
           file.name,
           pdfData.text,
           pdfBase64

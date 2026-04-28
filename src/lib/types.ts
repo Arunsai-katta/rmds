@@ -4,6 +4,37 @@ export interface ProviderFacilityMapping {
   facilityId: string;
 }
 
+export interface Provider {
+  id: string;
+  name: string;
+  npi: string;
+  credential: string;
+  firstName: string;
+  lastName: string;
+  practiceGroup: string;
+}
+
+export interface Facility {
+  id: string;
+  name: string;
+  companyId: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+}
+
+export interface EMRClient {
+  id: string;
+  name: string;
+  connectionType: "api" | "sftp";
+  authToken?: string;
+  sftpHost?: string;
+  sftpPort?: string;
+  sftpUser?: string;
+  sftpPass?: string;
+}
+
 export interface ParsedPDFResult {
   id: string;
   fileName: string;

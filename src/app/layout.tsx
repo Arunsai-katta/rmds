@@ -20,10 +20,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
             </div>
             <nav className="sidebar-nav">
-              <a href="/" id="nav-dashboard"><span className="nav-icon">📊</span> Dashboard</a>
-              <a href="/mappings" id="nav-mappings"><span className="nav-icon">🔗</span> Mappings</a>
-              <a href="/upload" id="nav-upload"><span className="nav-icon">📤</span> Upload PDFs</a>
-              <a href="/results" id="nav-results"><span className="nav-icon">📋</span> Results & Send</a>
+              <a href="/mappings" id="nav-mappings"><span className="nav-icon">🔗</span> Mapping Data</a>
+              <a href="/upload" id="nav-upload"><span className="nav-icon">📤</span> Upload Results</a>
+              <a href="/results" id="nav-results"><span className="nav-icon">🚀</span> Send Results</a>
             </nav>
           </aside>
           <main className="main-content">{children}</main>

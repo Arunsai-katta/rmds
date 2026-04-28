@@ -1,6 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
 import { ParsedPDFResult } from "./types";
-import { facilities } from "@/data/facilities";
 
 function formatHL7Timestamp(date?: Date): string {
   const d = date || new Date();
@@ -123,16 +122,22 @@ export function generateHL7(input: HL7GeneratorInput): string {
   return segments.join("\r\n") + "\r\n";
 }
 
-export function buildHL7FromParsedResult(
+export async function buildHL7FromParsedResult(
   parsed: ParsedPDFResult,
   overrides?: Partial<HL7GeneratorInput>
-): string {
-  // Find facility details
-  const facility = facilities.find(
-    (f) =>
-      f.companyId === (overrides?.facilityCompanyId || parsed.facilityId) ||
-      f.name === (overrides?.facilityName || parsed.facilityName)
-  );
+): Promise<string> {
+  let facility = null;
+  try {
+    const res = await fetch("http://localhost:3000/api/facilities");
+    if (res.ok) {
+      const facilities: any[] = await res.json();
+      facility = facilities.find(
+        (f) =>
+          f.companyId === (overrides?.facilityCompanyId || parsed.facilityId) ||
+          f.name === (overrides?.facilityName || parsed.facilityName)
+      );
+    }
+  } catch(e) {}
 
   const input: HL7GeneratorInput = {
     patientLastName: parsed.patientLastName,

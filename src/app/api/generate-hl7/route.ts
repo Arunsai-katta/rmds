@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const hl7Content = buildHL7FromParsedResult(parsedData, overrides);
+    const hl7Content = await buildHL7FromParsedResult(parsedData, overrides);
 
     return NextResponse.json({
       hl7Content,
