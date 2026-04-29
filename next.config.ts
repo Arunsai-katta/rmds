@@ -7,6 +7,15 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "50mb",
     },
   },
+  webpack: (config) => {
+    config.resolve.alias.canvas = false;
+    return config;
+  },
+  turbopack: {
+    resolveAlias: {
+      canvas: "./empty-module.js"
+    }
+  }
 };
 
 export default nextConfig;

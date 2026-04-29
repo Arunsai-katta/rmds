@@ -88,5 +88,14 @@
     "firstName": "BHAVINIBEN",
     "lastName": "PATEL",
     "practiceGroup": "A to Z Med"
+  },
+  {
+    "id": "prov-864acdf6",
+    "name": "Umoh elsie ",
+    "firstName": "Umoh ",
+    "lastName": "elsie ",
+    "npi": "123456789",
+    "practiceGroup": "Mercy Gathogo",
+    "credential": "NP"
   }
 ]
