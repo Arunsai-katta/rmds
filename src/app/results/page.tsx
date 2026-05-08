@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Provider, Facility, EMRClient, ParsedPDFResult, HL7Result } from "@/lib/types";
+import { Provider, Facility, EMRClient, ParsedPDFResult, HL7Result, CPTMapping } from "@/lib/types";
 
 function HL7Highlight({ content }: { content: string }) {
   if (!content) return null;
@@ -32,6 +32,7 @@ export default function ResultsPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [emrClients, setEmrClients] = useState<EMRClient[]>([]);
+  const [cptCodes, setCptCodes] = useState<CPTMapping[]>([]);
   
   const [emrType, setEmrType] = useState("");
   const [sending, setSending] = useState(false);
@@ -48,6 +49,8 @@ export default function ResultsPage() {
   const [editTestName, setEditTestName] = useState("");
   const [editPatientFirst, setEditPatientFirst] = useState("");
   const [editPatientLast, setEditPatientLast] = useState("");
+  const [editPatientGender, setEditPatientGender] = useState("");
+  const [editFacilityId, setEditFacilityId] = useState("");
 
   const showToast = (msg: string, type = "success") => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 3000);
@@ -55,13 +58,15 @@ export default function ResultsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [pRes, fRes, eRes] = await Promise.all([
-        fetch("/api/providers"), fetch("/api/facilities"), fetch("/api/emr-clients")
+      const [pRes, fRes, eRes, cptRes] = await Promise.all([
+        fetch("/api/providers"), fetch("/api/facilities"), fetch("/api/emr-clients"), fetch("/api/cpt-codes")
       ]);
       setProviders(await pRes.json());
-      setFacilities(await fRes.json());
-      const emrs = await eRes.json();
+      const facs: Facility[] = await fRes.json();
+      setFacilities(facs);
+      const emrs: EMRClient[] = await eRes.json();
       setEmrClients(emrs);
+      setCptCodes(await cptRes.json());
       if (emrs.length > 0) setEmrType(emrs[0].id);
     } catch {}
 
@@ -104,18 +109,41 @@ export default function ResultsPage() {
     setEditPhysFirst(selected.parsedData.referringPhysicianFirstName);
     setEditPhysLast(selected.parsedData.referringPhysicianLastName);
     setEditPhysCred(selected.parsedData.referringPhysicianCredential);
-    setEditFacility(selected.parsedData.facilityName);
+    const matchedFac = facilities.find(f => f.name === selected.parsedData.facilityName || f.id === selected.parsedData.facilityId);
+    setEditFacility(matchedFac?.name || selected.parsedData.facilityName);
+    setEditFacilityId(matchedFac?.id || "");
     setEditTestName(selected.parsedData.testName);
     setEditPatientFirst(selected.parsedData.patientFirstName);
     setEditPatientLast(selected.parsedData.patientLastName);
+    setEditPatientGender(selected.parsedData.patientGender || "U");
     setEditMode(true);
   };
 
   const applyProviderSelect = (npi: string) => {
     const prov = providers.find((p) => p.npi === npi);
-    if (prov) {
-      setEditPhysNPI(prov.npi); setEditPhysFirst(prov.firstName); setEditPhysLast(prov.lastName); setEditPhysCred(prov.credential);
+    if (!prov) return;
+    setEditPhysNPI(prov.npi);
+    setEditPhysFirst(prov.firstName);
+    setEditPhysLast(prov.lastName);
+    setEditPhysCred(prov.credential);
+    // Auto-set facility from provider's linked facilityId
+    if (prov.facilityId) {
+      const fac = facilities.find(f => f.id === prov.facilityId);
+      if (fac) {
+        setEditFacility(fac.name);
+        setEditFacilityId(fac.id);
+        // Auto-set EMR from facility's linked emrClientId
+        if (fac.emrClientId) setEmrType(fac.emrClientId);
+      }
     }
+  };
+
+  const applyFacilitySelect = (facilityId: string) => {
+    const fac = facilities.find(f => f.id === facilityId);
+    if (!fac) return;
+    setEditFacility(fac.name);
+    setEditFacilityId(fac.id);
+    if (fac.emrClientId) setEmrType(fac.emrClientId);
   };
 
   const regenerateHL7 = async () => {
@@ -127,9 +155,14 @@ export default function ResultsPage() {
       updatedParsed.referringPhysicianLastName = editPhysLast;
       updatedParsed.referringPhysicianCredential = editPhysCred;
       updatedParsed.facilityName = editFacility;
+      updatedParsed.facilityId = editFacilityId;
       updatedParsed.testName = editTestName;
       updatedParsed.patientFirstName = editPatientFirst;
       updatedParsed.patientLastName = editPatientLast;
+      updatedParsed.patientGender = editPatientGender;
+      // Update cptCode and description from selected CPT
+      const cpt = cptCodes.find(c => c.shortName === editTestName || c.description === editTestName || c.code === editTestName);
+      if (cpt) { updatedParsed.cptCode = cpt.code; updatedParsed.testDescription = cpt.description; }
     }
     
     try {
@@ -260,9 +293,17 @@ export default function ResultsPage() {
                             <label className="form-label">Patient Last Name</label>
                             <input className="form-input" value={editPatientLast} onChange={(e) => setEditPatientLast(e.target.value)} />
                           </div>
+                          <div className="form-group w-full" style={{ gridColumn: "1/-1" }}>
+                            <label className="form-label">Patient Gender</label>
+                            <select className="form-select" value={editPatientGender} onChange={(e) => setEditPatientGender(e.target.value)}>
+                              <option value="U">Unknown</option>
+                              <option value="M">Male</option>
+                              <option value="F">Female</option>
+                            </select>
+                          </div>
                           <div className="form-group" style={{gridColumn: "1/-1"}}>
                             <label className="form-label">Select Saved Physician</label>
-                            <select className="form-select" onChange={(e) => applyProviderSelect(e.target.value)}>
+                            <select className="form-select" value={editPhysNPI} onChange={(e) => applyProviderSelect(e.target.value)}>
                               <option value="">Custom Entry...</option>
                               {providers.map(p => <option key={p.npi} value={p.npi}>{p.firstName} {p.lastName} ({p.npi})</option>)}
                             </select>
@@ -281,14 +322,23 @@ export default function ResultsPage() {
                           </div>
                           <div className="form-group w-full">
                             <label className="form-label">Facility</label>
-                            <select className="form-select" value={editFacility} onChange={(e) => setEditFacility(e.target.value)}>
+                            <select className="form-select" value={editFacilityId} onChange={(e) => applyFacilitySelect(e.target.value)}>
                               <option value="">Select Facility...</option>
-                              {facilities.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                              {facilities.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                             </select>
                           </div>
                           <div className="form-group" style={{gridColumn: "1/-1"}}>
                             <label className="form-label">Test / Study Name</label>
-                            <input className="form-input" value={editTestName} onChange={(e) => setEditTestName(e.target.value)} />
+                            <select className="form-select" value={editTestName} onChange={(e) => setEditTestName(e.target.value)}>
+                              <option value="">Select CPT / Study...</option>
+                              {cptCodes.map(c => (
+                                <option key={c.code} value={c.shortName}>{c.code} — {c.shortName} ({c.description})</option>
+                              ))}
+                              {/* Keep current value selectable if it doesn't match a CPT */}
+                              {editTestName && !cptCodes.some(c => c.shortName === editTestName) && (
+                                <option value={editTestName}>{editTestName}</option>
+                              )}
+                            </select>
                           </div>
                         </div>
                         <div className="flex gap-2 mt-4">

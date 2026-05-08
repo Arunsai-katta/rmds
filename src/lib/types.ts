@@ -1,3 +1,10 @@
+export interface CPTMapping {
+  code: string;
+  description: string;
+  shortName: string;
+  keywords: string[];
+}
+
 export interface ProviderFacilityMapping {
   id: string;
   providerId: string;
@@ -12,6 +19,7 @@ export interface Provider {
   firstName: string;
   lastName: string;
   practiceGroup: string;
+  facilityId?: string;
 }
 
 export interface Facility {
@@ -22,6 +30,7 @@ export interface Facility {
   city: string;
   state: string;
   zip: string;
+  emrClientId?: string;
 }
 
 export interface EMRClient {

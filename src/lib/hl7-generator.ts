@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { ParsedPDFResult } from "./types";
-import fs from "fs";
-import path from "path";
+import dbConnect from "./dbConnect";
+import FacilityModel from "./models/Facility";
 
 function formatHL7Timestamp(date?: Date): string {
   const d = date || new Date();
@@ -128,19 +128,19 @@ export async function buildHL7FromParsedResult(
   parsed: ParsedPDFResult,
   overrides?: Partial<HL7GeneratorInput>
 ): Promise<string> {
-  let facility = null;
+  let facility: any = null;
   try {
-    const facilitiesPath = path.join(process.cwd(), "src", "data", "facilities.json");
-    if (fs.existsSync(facilitiesPath)) {
-      const facilities: any[] = JSON.parse(fs.readFileSync(facilitiesPath, "utf-8"));
-      facility = facilities.find(
-        (f) =>
-          f.companyId === (overrides?.facilityCompanyId || parsed.facilityId) ||
-          f.name === (overrides?.facilityName || parsed.facilityName)
-      );
+    await dbConnect();
+    const searchId = overrides?.facilityCompanyId || parsed.facilityId;
+    const searchName = overrides?.facilityName || parsed.facilityName;
+    if (searchId) {
+      facility = await FacilityModel.findOne({ $or: [{ companyId: searchId }, { id: searchId }] }).lean();
     }
-  } catch(e) {
-    console.error("Error reading facilities.json:", e);
+    if (!facility && searchName) {
+      facility = await FacilityModel.findOne({ name: searchName }).lean();
+    }
+  } catch (e) {
+    console.error("Error querying facility from DB:", e);
   }
 
   const input: HL7GeneratorInput = {

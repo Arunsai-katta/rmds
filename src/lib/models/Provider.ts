@@ -8,6 +8,7 @@ const ProviderSchema = new Schema({
   firstName: String,
   lastName: String,
   practiceGroup: String,
+  facilityId: String,
 });
 
 export default mongoose.models.Provider || mongoose.model('Provider', ProviderSchema);

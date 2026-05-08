@@ -1,8 +1,25 @@
-import { findCPTByKeywords } from "@/data/cpt-codes";
 import { ParsedPDFResult } from "./types";
 import { v4 as uuidv4 } from "uuid";
-import fs from "fs";
-import path from "path";
+import dbConnect from "./dbConnect";
+import CPTCodeModel from "./models/CPTCode";
+import ProviderModel from "./models/Provider";
+import FacilityModel from "./models/Facility";
+
+async function findCPTByKeywordsDB(testName: string): Promise<{ code: string; description: string; shortName: string; keywords: string[] } | null> {
+  if (!testName) return null;
+  const normalized = testName.toLowerCase();
+  const codes = await CPTCodeModel.find({}).lean() as { code: string; description: string; shortName: string; keywords: string[] }[];
+  let bestMatch: (typeof codes)[0] | null = null;
+  let bestScore = 0;
+  for (const mapping of codes) {
+    let score = 0;
+    for (const keyword of mapping.keywords) {
+      if (normalized.includes(keyword.toLowerCase())) score++;
+    }
+    if (score > bestScore) { bestScore = score; bestMatch = mapping; }
+  }
+  return bestScore > 0 ? bestMatch : null;
+}
 
 interface ExtractionResult {
   patientLastName: string;
@@ -127,14 +144,6 @@ export function parseReportText(text: string, fileName: string = ""): Extraction
   match = text.match(/(?:DATE\s*OF\s*EXAM|Date)\s*:\s*([\d/\-:\s]+)/i);
   if (match) { result.examDate = match[1].trim().split(/\s/)[0]; fieldsFound++; }
 
-  const cpt = findCPTByKeywords(result.testName);
-  if (cpt) {
-    result.testDescription = cpt.description;
-    if (!result.testName) result.testName = cpt.shortName;
-  } else {
-    result.testDescription = result.testName;
-  }
-
   result.confidence = Math.round((fieldsFound / 6) * 100);
   return result;
 }
@@ -143,36 +152,55 @@ export async function buildParsedPDFResult(
   fileName: string, text: string, pdfBase64: string
 ): Promise<ParsedPDFResult> {
   const extracted = parseReportText(text, fileName);
-  const cpt = findCPTByKeywords(extracted.testName);
 
-  // Read providers locally instead of fetching from API url to avoid localhost issues
-  let providerMatch = null;
+  await dbConnect();
+
+  // CPT lookup from DB
+  const cpt = await findCPTByKeywordsDB(extracted.testName);
+
+  // Resolve testDescription/testName from CPT match
+  if (cpt) {
+    extracted.testDescription = cpt.description;
+    if (!extracted.testName) extracted.testName = cpt.shortName;
+  } else {
+    extracted.testDescription = extracted.testName;
+  }
+
+  // Provider lookup from DB
+  let providerMatch: any = null;
   try {
-    const providersPath = path.join(process.cwd(), "src", "data", "providers.json");
-    if (fs.existsSync(providersPath)) {
-      const providers: any[] = JSON.parse(fs.readFileSync(providersPath, "utf-8"));
-      
-      const extLast = extracted.referringPhysicianLast.toUpperCase();
-      const extFirst = extracted.referringPhysicianFirst.toUpperCase();
-      
-      // Match by exact last name first
-      if (extLast) {
-        providerMatch = providers.find(p => p.lastName.toUpperCase() === extLast);
-        
-        // If multiple with same last name, try to match first name
-        if (!providerMatch && extFirst) {
-          providerMatch = providers.find(p => p.lastName.toUpperCase() === extLast && p.firstName.toUpperCase().includes(extFirst));
-        }
-      }
-      
-      // Fallback: match by checking if provider last name is anywhere in the raw extracted string
-      if (!providerMatch && extracted.referringPhysicianName) {
-        const searchName = extracted.referringPhysicianName.toUpperCase();
-        providerMatch = providers.find(p => searchName.includes(p.lastName.toUpperCase()));
+    const providers = await ProviderModel.find({}).lean() as any[];
+    const extLast = extracted.referringPhysicianLast.toUpperCase();
+    const extFirst = extracted.referringPhysicianFirst.toUpperCase();
+
+    if (extLast) {
+      providerMatch = providers.find((p: any) => p.lastName?.toUpperCase() === extLast);
+      if (!providerMatch && extFirst) {
+        providerMatch = providers.find((p: any) => p.lastName?.toUpperCase() === extLast && p.firstName?.toUpperCase().includes(extFirst));
       }
     }
+    if (!providerMatch && extracted.referringPhysicianName) {
+      const searchName = extracted.referringPhysicianName.toUpperCase();
+      providerMatch = providers.find((p: any) => searchName.includes(p.lastName?.toUpperCase()));
+    }
   } catch (e) {
-    console.error("Error reading providers.json:", e);
+    console.error("Error querying providers from DB:", e);
+  }
+
+  // Facility lookup from DB
+  let facilityMatch: any = null;
+  try {
+    if (extracted.facilityName) {
+      const facilities = await FacilityModel.find({}).lean() as any[];
+      const searchFac = extracted.facilityName.toUpperCase();
+      facilityMatch = facilities.find((f: any) =>
+        f.name?.toUpperCase() === searchFac ||
+        searchFac.includes(f.name?.toUpperCase()) ||
+        f.name?.toUpperCase().includes(searchFac)
+      );
+    }
+  } catch (e) {
+    console.error("Error querying facilities from DB:", e);
   }
 
   return {
@@ -187,8 +215,8 @@ export async function buildParsedPDFResult(
     referringPhysicianCredential: providerMatch?.credential || extracted.referringPhysicianCred || "NP",
     referringPhysicianFirstName: providerMatch?.firstName || extracted.referringPhysicianFirst || "",
     referringPhysicianLastName: providerMatch?.lastName || extracted.referringPhysicianLast || "",
-    facilityName: extracted.facilityName,
-    facilityId: "",
+    facilityName: facilityMatch?.name || extracted.facilityName,
+    facilityId: facilityMatch?.id || "",
     testName: extracted.testName,
     testDescription: extracted.testDescription || extracted.testName,
     cptCode: cpt?.code || "",

@@ -1,15 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Provider, Facility, ProviderFacilityMapping, EMRClient } from "@/lib/types";
+import { Provider, Facility, EMRClient, CPTMapping } from "@/lib/types";
 
 export default function MappingDataPage() {
-  const [activeTab, setActiveTab] = useState<"providers" | "facilities" | "mappings" | "emr">("providers");
+  const [activeTab, setActiveTab] = useState<"providers" | "facilities" | "emr" | "cpt">("providers");
   
   const [providers, setProviders] = useState<Provider[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
-  const [mappings, setMappings] = useState<ProviderFacilityMapping[]>([]);
   const [emrClients, setEmrClients] = useState<EMRClient[]>([]);
+  const [cptCodes, setCptCodes] = useState<CPTMapping[]>([]);
   
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
@@ -21,13 +21,13 @@ export default function MappingDataPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [provRes, facRes, mapRes, emrRes] = await Promise.all([
-        fetch("/api/providers"), fetch("/api/facilities"), fetch("/api/mappings"), fetch("/api/emr-clients")
+      const [provRes, facRes, emrRes, cptRes] = await Promise.all([
+        fetch("/api/providers"), fetch("/api/facilities"), fetch("/api/emr-clients"), fetch("/api/cpt-codes")
       ]);
       setProviders(await provRes.json());
       setFacilities(await facRes.json());
-      setMappings((await mapRes.json()).mappings || []);
       setEmrClients(await emrRes.json());
+      setCptCodes(await cptRes.json());
     } catch {
       showToast("Failed to load data", "error");
     }
@@ -57,7 +57,7 @@ export default function MappingDataPage() {
 
   // --- Modal States ---
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<"provider" | "facility" | "mapping" | "emr">("provider");
+  const [modalType, setModalType] = useState<"provider" | "facility" | "emr" | "cpt">("provider");
   const [editId, setEditId] = useState<string | null>(null);
   const [formData, setFormData] = useState<any>({});
 
@@ -72,8 +72,17 @@ export default function MappingDataPage() {
     try {
       if (modalType === "provider") await handleSave("/api/providers", formData, editId || undefined);
       if (modalType === "facility") await handleSave("/api/facilities", formData, editId || undefined);
-      if (modalType === "mapping") await handleSave("/api/mappings", formData, editId || undefined);
       if (modalType === "emr") await handleSave("/api/emr-clients", formData, editId || undefined);
+      if (modalType === "cpt") {
+        // CPT codes use `code` as key, not `id`
+        const method = editId ? "PUT" : "POST";
+        const res = await fetch("/api/cpt-codes", {
+          method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(formData)
+        });
+        if (!res.ok) throw new Error("Save failed");
+        showToast("Saved successfully");
+        fetchData();
+      }
       setModalOpen(false);
     } catch {
       showToast("Error saving", "error");
@@ -92,14 +101,14 @@ export default function MappingDataPage() {
       <div className="page-body">
         {/* Tabs */}
         <div className="flex gap-2 mb-6" style={{ borderBottom: "1px solid var(--border-color)", paddingBottom: 16 }}>
-          {["providers", "facilities", "mappings", "emr"].map((tab) => (
+          {["providers", "facilities", "emr", "cpt"].map((tab) => (
             <button
               key={tab}
               className={`btn ${activeTab === tab ? "btn-primary" : "btn-secondary"}`}
               onClick={() => setActiveTab(tab as any)}
               style={{ textTransform: "capitalize" }}
             >
-              {tab === "emr" ? "EMR Clients" : tab}
+              {tab === "emr" ? "EMR Clients" : tab === "cpt" ? "CPT Codes" : tab}
             </button>
           ))}
         </div>
@@ -113,14 +122,14 @@ export default function MappingDataPage() {
             </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Name</th><th>NPI</th><th>Credential</th><th>Practice Group</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Name</th><th>NPI</th><th>Credential</th><th>Facility</th><th>Actions</th></tr></thead>
                 <tbody>
                   {providers.map((p) => (
                     <tr key={p.id}>
                       <td style={{ fontWeight: 600 }}>{p.firstName} {p.lastName}</td>
                       <td><code>{p.npi}</code></td>
                       <td><span className="badge badge-info">{p.credential}</span></td>
-                      <td>{p.practiceGroup}</td>
+                      <td>{facilities.find(f => f.id === p.facilityId)?.name || p.practiceGroup || '-'}</td>
                       <td>
                         <button className="btn btn-secondary btn-sm" onClick={() => openModal("provider", p)} style={{ marginRight: 8 }}>Edit</button>
                         <button className="btn btn-danger btn-sm" onClick={() => handleDelete("/api/providers", p.id)}>Delete</button>
@@ -142,43 +151,17 @@ export default function MappingDataPage() {
             </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Name</th><th>Company ID</th><th>Address</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Name</th><th>Company ID</th><th>Address</th><th>EMR Client</th><th>Actions</th></tr></thead>
                 <tbody>
                   {facilities.map((f) => (
                     <tr key={f.id}>
                       <td style={{ fontWeight: 600 }}>{f.name}</td>
                       <td><code>{f.companyId}</code></td>
                       <td>{f.address} {f.city} {f.state} {f.zip}</td>
+                      <td>{emrClients.find(e => e.id === f.emrClientId)?.name || '-'}</td>
                       <td>
                         <button className="btn btn-secondary btn-sm" onClick={() => openModal("facility", f)} style={{ marginRight: 8 }}>Edit</button>
                         <button className="btn btn-danger btn-sm" onClick={() => handleDelete("/api/facilities", f.id)}>Delete</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* MAPPINGS TAB */}
-        {activeTab === "mappings" && (
-          <div className="card">
-            <div className="flex justify-between items-center mb-4">
-              <h3 style={{ fontWeight: 700 }}>Provider -&gt; Facility Mappings ({mappings.length})</h3>
-              <button className="btn btn-primary btn-sm" onClick={() => openModal("mapping")}>+ Add Mapping</button>
-            </div>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Provider</th><th>Facility</th><th>Actions</th></tr></thead>
-                <tbody>
-                  {mappings.map((m) => (
-                    <tr key={m.id}>
-                      <td style={{ fontWeight: 600 }}>{providers.find(p => p.id === m.providerId)?.name || m.providerId}</td>
-                      <td>{facilities.find(f => f.id === m.facilityId)?.name || m.facilityId}</td>
-                      <td>
-                        <button className="btn btn-secondary btn-sm" onClick={() => openModal("mapping", m)} style={{ marginRight: 8 }}>Edit</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => handleDelete("/api/mappings", m.id)}>Delete</button>
                       </td>
                     </tr>
                   ))}
@@ -221,13 +204,47 @@ export default function MappingDataPage() {
             </div>
           </div>
         )}
+
+        {/* CPT CODES TAB */}
+        {activeTab === "cpt" && (
+          <div className="card">
+            <div className="flex justify-between items-center mb-4">
+              <h3 style={{ fontWeight: 700 }}>CPT Codes ({cptCodes.length})</h3>
+              <button className="btn btn-primary btn-sm" onClick={() => openModal("cpt")}>+ Add CPT Code</button>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Code</th><th>Short Name</th><th>Description</th><th>Keywords</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {cptCodes.map((c) => (
+                    <tr key={c.code}>
+                      <td><code>{c.code}</code></td>
+                      <td style={{ fontWeight: 600 }}>{c.shortName}</td>
+                      <td>{c.description}</td>
+                      <td><span className="text-xs text-muted">{c.keywords?.join(", ")}</span></td>
+                      <td>
+                        <button className="btn btn-secondary btn-sm" onClick={() => openModal("cpt", { ...c, id: c.code })} style={{ marginRight: 8 }}>Edit</button>
+                        <button className="btn btn-danger btn-sm" onClick={async () => {
+                          if (!confirm("Delete this CPT code?")) return;
+                          await fetch(`/api/cpt-codes?code=${c.code}`, { method: "DELETE" });
+                          showToast("Deleted successfully");
+                          fetchData();
+                        }}>Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* MODAL */}
       {modalOpen && (
         <div className="modal-overlay" onClick={() => setModalOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{editId ? "Edit" : "Add"} {modalType.toUpperCase()}</h3>
+            <h3>{editId ? "Edit" : "Add"} {modalType === "cpt" ? "CPT CODE" : modalType.toUpperCase()}</h3>
 
             {modalType === "provider" && (
               <>
@@ -256,19 +273,11 @@ export default function MappingDataPage() {
                   </div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Practice Group</label>
-                  <input 
-                    className="form-input" 
-                    list="practice-groups" 
-                    value={formData.practiceGroup || ""} 
-                    onChange={(e) => setFormData({...formData, practiceGroup: e.target.value})} 
-                    placeholder="Select or type new group..."
-                  />
-                  <datalist id="practice-groups">
-                    {Array.from(new Set(providers.map(p => p.practiceGroup).filter(Boolean))).map(group => (
-                      <option key={group} value={group} />
-                    ))}
-                  </datalist>
+                  <label className="form-label">Facility</label>
+                  <select className="form-select" value={formData.facilityId || ""} onChange={(e) => setFormData({...formData, facilityId: e.target.value})}>
+                    <option value="">Select facility...</option>
+                    {facilities.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
                 </div>
               </>
             )}
@@ -301,23 +310,11 @@ export default function MappingDataPage() {
                     <input className="form-input" value={formData.zip || ""} onChange={(e) => setFormData({...formData, zip: e.target.value})} />
                   </div>
                 </div>
-              </>
-            )}
-
-            {modalType === "mapping" && (
-              <>
                 <div className="form-group">
-                  <label className="form-label">Provider</label>
-                  <select className="form-select" value={formData.providerId || ""} onChange={(e) => setFormData({...formData, providerId: e.target.value})}>
-                    <option value="">Select...</option>
-                    {providers.map(p => <option key={p.id} value={p.id}>{p.name} ({p.npi})</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Facility</label>
-                  <select className="form-select" value={formData.facilityId || ""} onChange={(e) => setFormData({...formData, facilityId: e.target.value})}>
-                    <option value="">Select...</option>
-                    {facilities.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  <label className="form-label">EMR Client</label>
+                  <select className="form-select" value={formData.emrClientId || ""} onChange={(e) => setFormData({...formData, emrClientId: e.target.value})}>
+                    <option value="">Select EMR...</option>
+                    {emrClients.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                   </select>
                 </div>
               </>
@@ -378,6 +375,34 @@ export default function MappingDataPage() {
                     </div>
                   </div>
                 )}
+              </>
+            )}
+
+            {modalType === "cpt" && (
+              <>
+                <div className="flex gap-4">
+                  <div className="form-group" style={{ width: 140 }}>
+                    <label className="form-label">CPT Code</label>
+                    <input className="form-input" value={formData.code || ""} disabled={!!editId} onChange={(e) => setFormData({...formData, code: e.target.value})} placeholder="e.g. 71046" />
+                  </div>
+                  <div className="form-group w-full">
+                    <label className="form-label">Short Name</label>
+                    <input className="form-input" value={formData.shortName || ""} onChange={(e) => setFormData({...formData, shortName: e.target.value})} placeholder="e.g. CHEST X-RAY" />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Description</label>
+                  <input className="form-input" value={formData.description || ""} onChange={(e) => setFormData({...formData, description: e.target.value})} placeholder="e.g. Chest X-Ray 2 Views" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Keywords <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(comma-separated)</span></label>
+                  <input
+                    className="form-input"
+                    value={Array.isArray(formData.keywords) ? formData.keywords.join(", ") : formData.keywords || ""}
+                    onChange={(e) => setFormData({...formData, keywords: e.target.value})}
+                    placeholder="e.g. chest, x-ray, xray"
+                  />
+                </div>
               </>
             )}
 
