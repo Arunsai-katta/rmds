@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ParsedPDFResult } from "@/lib/types";
 
 export default function UploadPage() {
-  const [files, setFiles] = useState<{ file: File; status: "pending" | "uploading" | "ocr" | "done" | "error" }[]>([]);
+  const [files, setFiles] = useState<{ file: File; status: "pending" | "uploading" | "ocr" | "generating" | "done" | "error" }[]>([]);
   const [results, setResults] = useState<ParsedPDFResult[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
@@ -100,17 +100,20 @@ export default function UploadPage() {
 
           const newRes = parsedRes;
           newResults.push(newRes);
+
+          // Generate HL7 and save to DB as pending
+          setFiles(prev => { const next = [...prev]; next[i].status = "generating"; return next; });
+          await fetch("/api/generate-hl7", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parsedData: newRes, saveToDb: true }),
+          });
+
           setFiles(prev => {
             const next = [...prev];
             next[i].status = "done";
             return next;
           });
-
-          // Automatically save to sessionStorage
-          const existing = sessionStorage.getItem("parsedResults");
-          let allResults = existing ? JSON.parse(existing) : [];
-          allResults.push(newRes);
-          sessionStorage.setItem("parsedResults", JSON.stringify(allResults));
         } else {
           throw new Error("Parse failed");
         }
@@ -132,8 +135,6 @@ export default function UploadPage() {
   };
 
   const saveAndContinue = () => {
-    // Already saved to session storage during parse
-    showToast("Navigating to review...");
     router.push("/results");
   };
 
@@ -174,9 +175,10 @@ export default function UploadPage() {
                   📄 {f.file.name} 
                   {f.status === "uploading" && <span className="loading-spinner" style={{width: 14, height: 14}}/>}
                   {f.status === "ocr" && <span className="text-xs" style={{color: "var(--warning)"}}>Running OCR...</span>}
+                  {f.status === "generating" && <span className="text-xs" style={{color: "var(--accent)"}}>Generating HL7...</span>}
                   {f.status === "error" && <span className="text-danger text-xs">(Failed)</span>}
                 </span>
-                {(f.status !== "uploading" && f.status !== "ocr") && (
+                {(f.status !== "uploading" && f.status !== "ocr" && f.status !== "generating") && (
                   <button className="btn btn-danger btn-sm btn-icon" onClick={() => removeFile(i)}>✕</button>
                 )}
               </div>

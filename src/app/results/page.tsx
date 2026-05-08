@@ -58,8 +58,9 @@ export default function ResultsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [pRes, fRes, eRes, cptRes] = await Promise.all([
-        fetch("/api/providers"), fetch("/api/facilities"), fetch("/api/emr-clients"), fetch("/api/cpt-codes")
+      const [pRes, fRes, eRes, cptRes, rRes] = await Promise.all([
+        fetch("/api/providers"), fetch("/api/facilities"), fetch("/api/emr-clients"),
+        fetch("/api/cpt-codes"), fetch("/api/results?status=pending")
       ]);
       setProviders(await pRes.json());
       const facs: Facility[] = await fRes.json();
@@ -68,38 +69,39 @@ export default function ResultsPage() {
       setEmrClients(emrs);
       setCptCodes(await cptRes.json());
       if (emrs.length > 0) setEmrType(emrs[0].id);
-    } catch {}
 
-    const stored = sessionStorage.getItem("parsedResults");
-    if (!stored) return;
-    
-    const parsed: ParsedPDFResult[] = JSON.parse(stored);
-    const generated: HL7Result[] = [];
-    
-    for (const p of parsed) {
-      try {
-        const res = await fetch("/api/generate-hl7", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parsedData: p }),
-        });
-        const data = await res.json();
-        generated.push({
-          id: data.messageId || `hl7-${Date.now()}-${Math.random()}`,
-          parsedData: p,
-          hl7Content: data.hl7Content || "",
-          emrType: "",
-          status: "pending",
-          createdAt: new Date().toISOString(),
-        });
-      } catch {
-        generated.push({ id: `hl7-err-${Date.now()}`, parsedData: p, hl7Content: "", emrType: "", status: "failed", createdAt: new Date().toISOString() });
-      }
+      const dbResults = await rRes.json();
+      const mapped: HL7Result[] = (dbResults as any[]).map((r) => ({
+        id: r.id,
+        parsedData: r.parsedData,
+        hl7Content: r.hl7Content || "",
+        emrType: r.emrClientId || "",
+        status: r.status,
+        createdAt: r.createdAt,
+        sentAt: r.sentAt,
+      }));
+      setResults(mapped);
+      if (mapped.length > 0) setSelectedIdx(0);
+    } catch {
+      showToast("Failed to load data", "error");
     }
-    setResults(generated);
-    if (generated.length > 0) setSelectedIdx(0);
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Auto-set Target EMR based on the selected result's facility
+  useEffect(() => {
+    if (selectedIdx === null || results.length === 0 || facilities.length === 0) return;
+    const result = results[selectedIdx];
+    if (!result) return;
+    const facilityId = result.parsedData.facilityId;
+    if (facilityId) {
+      const fac = facilities.find(f => f.id === facilityId);
+      if (fac?.emrClientId) { setEmrType(fac.emrClientId); return; }
+    }
+    // Fallback: use emrClientId stored on the result record itself
+    if (result.emrType) { setEmrType(result.emrType); return; }
+  }, [selectedIdx, results, facilities]);
 
   const selected = selectedIdx !== null ? results[selectedIdx] : null;
 
@@ -160,7 +162,6 @@ export default function ResultsPage() {
       updatedParsed.patientFirstName = editPatientFirst;
       updatedParsed.patientLastName = editPatientLast;
       updatedParsed.patientGender = editPatientGender;
-      // Update cptCode and description from selected CPT
       const cpt = cptCodes.find(c => c.shortName === editTestName || c.description === editTestName || c.code === editTestName);
       if (cpt) { updatedParsed.cptCode = cpt.code; updatedParsed.testDescription = cpt.description; }
     }
@@ -168,7 +169,11 @@ export default function ResultsPage() {
     try {
       const res = await fetch("/api/generate-hl7", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parsedData: updatedParsed }),
+        body: JSON.stringify({
+          parsedData: updatedParsed,
+          saveToDb: true,
+          resultId: selected.id,
+        }),
       });
       const data = await res.json();
       const updated = [...results];
@@ -191,9 +196,15 @@ export default function ResultsPage() {
           hl7Content: selected.hl7Content,
           emrType,
           fileName: `${selected.parsedData.patientLastName}_${selected.parsedData.patientFirstName}_HL7.txt`,
+          parsedData: selected.parsedData,
+          resultId: selected.id,
         }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || "Send failed", "error");
+        return;
+      }
       if (data.success) {
         const updated = [...results];
         updated[selectedIdx] = { ...updated[selectedIdx], status: "sent", emrType, sentAt: new Date().toISOString() };
@@ -201,16 +212,19 @@ export default function ResultsPage() {
         showToast("Sent to EMR successfully");
       }
     } catch {
-      showToast("Send failed", "error");
+      showToast("Network error — could not reach server", "error");
     }
     setSending(false);
   };
 
-  const removeResult = (idx: number) => {
+  const removeResult = async (idx: number) => {
+    const target = results[idx];
+    if (target) {
+      await fetch(`/api/results?id=${target.id}`, { method: "DELETE" });
+    }
     const updated = results.filter((_, i) => i !== idx);
     setResults(updated);
-    sessionStorage.setItem("parsedResults", JSON.stringify(updated.map(r => r.parsedData)));
-    setSelectedIdx(updated.length > 0 ? 0 : null);
+    setSelectedIdx(updated.length > 0 ? Math.min(idx, updated.length - 1) : null);
   };
 
   return (
