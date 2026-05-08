@@ -202,6 +202,10 @@ export default function ResultsPage() {
       });
       const data = await res.json();
       if (!res.ok) {
+        // Mark result as failed in UI immediately — no refresh needed
+        const updated = [...results];
+        updated[selectedIdx] = { ...updated[selectedIdx], status: "failed" };
+        setResults(updated);
         showToast(data.error || "Send failed", "error");
         return;
       }
@@ -213,9 +217,13 @@ export default function ResultsPage() {
         showToast("Sent to EMR successfully");
       }
     } catch {
+      const updated = [...results];
+      updated[selectedIdx] = { ...updated[selectedIdx], status: "failed" };
+      setResults(updated);
       showToast("Network error — could not reach server", "error");
+    } finally {
+      setSending(false);
     }
-    setSending(false);
   };
 
   const removeResult = async (idx: number) => {
