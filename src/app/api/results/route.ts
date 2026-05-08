@@ -7,7 +7,10 @@ export async function GET(req: NextRequest) {
     await dbConnect();
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
-    const query = status ? { status } : {};
+    // Support comma-separated values: ?status=pending,failed
+    const query = status
+      ? { status: { $in: status.split(",").map((s) => s.trim()) } }
+      : {};
     const results = await ResultModel.find(query).sort({ createdAt: -1 }).lean();
     return NextResponse.json(results);
   } catch (err) {

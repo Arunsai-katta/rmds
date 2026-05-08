@@ -1,46 +1,41 @@
-import { NextRequest, NextResponse } from "next/server";
-import { Client as SftpClient } from "ssh2";
+﻿import { NextRequest, NextResponse } from "next/server";
+import SFTPClient from "ssh2-sftp-client";
 import dbConnect from "@/lib/dbConnect";
 import EMRClientModel from "@/lib/models/EMRClient";
 import ResultModel from "@/lib/models/Result";
 import { v4 as uuidv4 } from "uuid";
 
 /* ── SFTP upload ─────────────────────────────────────────────────────────── */
-function sftpUpload(client: any, content: string, remotePath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const conn = new SftpClient();
-    conn.on("ready", () => {
-      conn.sftp((err, sftp) => {
-        if (err) { conn.end(); return reject(err); }
+async function sftpUpload(clientConfig: any, content: string, remotePath: string): Promise<void> {
+  const sftp = new SFTPClient();
+  sftp.on("error", (err: Error) => console.error("[sftp] connection error:", err));
 
-        const writeStream = sftp.createWriteStream(remotePath);
-        writeStream.on("close", () => { conn.end(); resolve(); });
-        writeStream.on("error", (e: Error) => { conn.end(); reject(e); });
-        writeStream.end(Buffer.from(content, "utf-8"));
-      });
-    });
-    conn.on("error", (err: Error) => {
-      // Enrich auth errors with actionable context
-      if (err.message?.toLowerCase().includes("permission denied")) {
-        reject(new Error(
-          `SFTP authentication failed for user "${client.sftpUser}" on ${client.sftpHost}:${client.sftpPort || 22}. ` +
-          `Check that the username and password stored for this EMR client are correct, ` +
-          `or that the server allows password-based authentication.`
-        ));
-      } else {
-        reject(err);
-      }
-    });
-    conn.connect({
-      host: client.sftpHost,
-      port: parseInt(client.sftpPort || "22", 10),
-      username: client.sftpUser,
-      password: client.sftpPass,
-      readyTimeout: 20000,
-      // Allow both password and keyboard-interactive auth
-      authHandler: ["password", "keyboard-interactive"],
-    });
-  });
+  const connectSettings: Record<string, unknown> = {
+    host: clientConfig.sftpHost,
+    port: parseInt(clientConfig.sftpPort || "22", 10),
+    username: clientConfig.sftpUser,
+    password: clientConfig.sftpPass,
+    retries: 2,
+  };
+
+  let connected = false;
+  try {
+    await sftp.connect(connectSettings);
+    connected = true;
+    console.log(`[send-hl7] SFTP connected -> uploading to ${remotePath}`);
+    await sftp.put(Buffer.from(content, "utf-8"), remotePath);
+    sftp.end();
+  } catch (err) {
+    if (connected) sftp.end();
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.toLowerCase().includes("permission denied") || msg.toLowerCase().includes("all auth methods failed")) {
+      throw new Error(
+        `SFTP authentication failed for "${clientConfig.sftpUser}"@${clientConfig.sftpHost}:${clientConfig.sftpPort || 22}. ` +
+        `Verify the credentials saved on this EMR client record.`
+      );
+    }
+    throw err;
+  }
 }
 
 /* ── API send (Practice Fusion style) ───────────────────────────────────── */
@@ -94,20 +89,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Resolve EMR client from DB
     const client = await EMRClientModel.findOne({ id: emrType }).lean() as any;
     if (!client) {
-      return NextResponse.json(
-        { error: "EMR client not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "EMR client not found" }, { status: 404 });
     }
 
     const resolvedFileName = (
       fileName || `HL7_${emrType}_${Date.now()}.txt`
     ).replace(/\s+/g, "_");
 
-    // Update existing DB record if resultId provided, else create new
     let dbResultId = resultId;
     if (dbResultId) {
       await ResultModel.findOneAndUpdate(
@@ -129,29 +119,24 @@ export async function POST(req: NextRequest) {
 
     try {
       if (client.connectionType === "sftp") {
-        const folder = (client.sftpFolder || "/").replace(/\/$/, "");
+        const folder = (client.sftpFolder || ".").replace(/\/$/, "");
         const remotePath = `${folder}/${resolvedFileName}`;
-        console.log(`[send-hl7] SFTP → ${client.sftpUser}@${client.sftpHost}:${client.sftpPort || 22}${remotePath}`);
+        console.log(`[send-hl7] SFTP -> ${client.sftpUser}@${client.sftpHost}:${client.sftpPort || 22}${remotePath}`);
         await sftpUpload(client, hl7Content, remotePath);
       } else {
-        console.log(`[send-hl7] API → ${client.apiUrl} (auth: ${client.authToken ? "present" : "none"})`);
+        console.log(`[send-hl7] API -> ${client.apiUrl} (auth: ${client.authToken ? "present" : "none"})`);
         await apiSend(client, hl7Content);
       }
     } catch (deliveryErr) {
       const errMsg = deliveryErr instanceof Error ? deliveryErr.message : String(deliveryErr);
-      console.error(`[send-hl7] Delivery failed for client "${client.name}" (${client.connectionType}): ${errMsg}`);
-      // Mark record as failed and surface the error — do NOT mark as sent
+      console.error(`[send-hl7] Delivery failed for "${client.name}" (${client.connectionType}): ${errMsg}`);
       await ResultModel.findOneAndUpdate(
         { id: dbResultId },
-        { status: "failed", error: deliveryErr instanceof Error ? deliveryErr.message : String(deliveryErr) }
+        { status: "failed", error: errMsg }
       );
-      return NextResponse.json(
-        { error: deliveryErr instanceof Error ? deliveryErr.message : "Delivery failed" },
-        { status: 502 }
-      );
+      return NextResponse.json({ error: errMsg }, { status: 502 });
     }
 
-    // Only reaches here on successful delivery
     await ResultModel.findOneAndUpdate(
       { id: dbResultId },
       { status: "sent", sentAt: new Date() }
@@ -171,7 +156,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/* ── GET /api/send-hl7?id=… (fetch a saved result) ─────────────────────── */
+/* ── GET /api/send-hl7?id=... ───────────────────────────────────────────── */
 export async function GET(req: NextRequest) {
   try {
     await dbConnect();

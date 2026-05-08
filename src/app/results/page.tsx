@@ -60,7 +60,7 @@ export default function ResultsPage() {
     try {
       const [pRes, fRes, eRes, cptRes, rRes] = await Promise.all([
         fetch("/api/providers"), fetch("/api/facilities"), fetch("/api/emr-clients"),
-        fetch("/api/cpt-codes"), fetch("/api/results?status=pending")
+        fetch("/api/cpt-codes"), fetch("/api/results?status=pending,failed")
       ]);
       setProviders(await pRes.json());
       const facs: Facility[] = await fRes.json();
@@ -206,9 +206,10 @@ export default function ResultsPage() {
         return;
       }
       if (data.success) {
-        const updated = [...results];
-        updated[selectedIdx] = { ...updated[selectedIdx], status: "sent", emrType, sentAt: new Date().toISOString() };
+        // Remove from the pending/failed list — it's been delivered
+        const updated = results.filter((_, i) => i !== selectedIdx);
         setResults(updated);
+        setSelectedIdx(updated.length > 0 ? Math.min(selectedIdx, updated.length - 1) : null);
         showToast("Sent to EMR successfully");
       }
     } catch {
@@ -250,7 +251,7 @@ export default function ResultsPage() {
           <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 20 }}>
             {/* List */}
             <div>
-              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Pending Results ({results.length})</h3>
+              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Pending Results ({results.filter(r => r.status !== "sent").length})</h3>
               {results.map((r, i) => (
                 <div
                   key={r.id} className="card"
@@ -261,7 +262,10 @@ export default function ResultsPage() {
                     <span style={{ fontSize: 13, fontWeight: 600 }}>
                       {r.parsedData.patientLastName || "?"}, {r.parsedData.patientFirstName || "?"}
                     </span>
-                    <span className={`badge ${r.status === "sent" ? "badge-success" : "badge-warning"}`}>{r.status}</span>
+                    <span className={`badge ${
+                        r.status === "sent" ? "badge-success"
+                        : r.status === "failed" ? "badge-danger"
+                        : "badge-warning"}`}>{r.status}</span>
                   </div>
                   <div className="text-muted text-xs flex justify-between">
                     <span className="truncate" style={{maxWidth: 180}}>{r.parsedData.testName || "Unknown Test"}</span>
