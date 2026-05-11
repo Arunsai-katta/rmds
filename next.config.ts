@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["pdf-parse"],
+  serverExternalPackages: ["pdf-parse", "ssh2", "ssh2-sftp-client"],
   experimental: {
     serverActions: {
       bodySizeLimit: "50mb",
