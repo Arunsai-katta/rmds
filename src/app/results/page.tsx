@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Provider, Facility, EMRClient, ParsedPDFResult, HL7Result } from "@/lib/types";
+import { Provider, Facility, EMRClient, ParsedPDFResult, HL7Result, CPTMapping } from "@/lib/types";
 
 function HL7Highlight({ content }: { content: string }) {
   if (!content) return null;
@@ -32,6 +32,7 @@ export default function ResultsPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [emrClients, setEmrClients] = useState<EMRClient[]>([]);
+  const [cptCodes, setCptCodes] = useState<CPTMapping[]>([]);
   
   const [emrType, setEmrType] = useState("");
   const [sending, setSending] = useState(false);
@@ -48,6 +49,8 @@ export default function ResultsPage() {
   const [editTestName, setEditTestName] = useState("");
   const [editPatientFirst, setEditPatientFirst] = useState("");
   const [editPatientLast, setEditPatientLast] = useState("");
+  const [editPatientGender, setEditPatientGender] = useState("");
+  const [editFacilityId, setEditFacilityId] = useState("");
 
   const showToast = (msg: string, type = "success") => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 3000);
@@ -55,46 +58,50 @@ export default function ResultsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [pRes, fRes, eRes] = await Promise.all([
-        fetch("/api/providers"), fetch("/api/facilities"), fetch("/api/emr-clients")
+      const [pRes, fRes, eRes, cptRes, rRes] = await Promise.all([
+        fetch("/api/providers"), fetch("/api/facilities"), fetch("/api/emr-clients"),
+        fetch("/api/cpt-codes"), fetch("/api/results?status=pending,failed")
       ]);
       setProviders(await pRes.json());
-      setFacilities(await fRes.json());
-      const emrs = await eRes.json();
+      const facs: Facility[] = await fRes.json();
+      setFacilities(facs);
+      const emrs: EMRClient[] = await eRes.json();
       setEmrClients(emrs);
+      setCptCodes(await cptRes.json());
       if (emrs.length > 0) setEmrType(emrs[0].id);
-    } catch {}
 
-    const stored = sessionStorage.getItem("parsedResults");
-    if (!stored) return;
-    
-    const parsed: ParsedPDFResult[] = JSON.parse(stored);
-    const generated: HL7Result[] = [];
-    
-    for (const p of parsed) {
-      try {
-        const res = await fetch("/api/generate-hl7", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parsedData: p }),
-        });
-        const data = await res.json();
-        generated.push({
-          id: data.messageId || `hl7-${Date.now()}-${Math.random()}`,
-          parsedData: p,
-          hl7Content: data.hl7Content || "",
-          emrType: "",
-          status: "pending",
-          createdAt: new Date().toISOString(),
-        });
-      } catch {
-        generated.push({ id: `hl7-err-${Date.now()}`, parsedData: p, hl7Content: "", emrType: "", status: "failed", createdAt: new Date().toISOString() });
-      }
+      const dbResults = await rRes.json();
+      const mapped: HL7Result[] = (dbResults as any[]).map((r) => ({
+        id: r.id,
+        parsedData: r.parsedData,
+        hl7Content: r.hl7Content || "",
+        emrType: r.emrClientId || "",
+        status: r.status,
+        createdAt: r.createdAt,
+        sentAt: r.sentAt,
+      }));
+      setResults(mapped);
+      if (mapped.length > 0) setSelectedIdx(0);
+    } catch {
+      showToast("Failed to load data", "error");
     }
-    setResults(generated);
-    if (generated.length > 0) setSelectedIdx(0);
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Auto-set Target EMR based on the selected result's facility
+  useEffect(() => {
+    if (selectedIdx === null || results.length === 0 || facilities.length === 0) return;
+    const result = results[selectedIdx];
+    if (!result) return;
+    const facilityId = result.parsedData.facilityId;
+    if (facilityId) {
+      const fac = facilities.find(f => f.id === facilityId);
+      if (fac?.emrClientId) { setEmrType(fac.emrClientId); return; }
+    }
+    // Fallback: use emrClientId stored on the result record itself
+    if (result.emrType) { setEmrType(result.emrType); return; }
+  }, [selectedIdx, results, facilities]);
 
   const selected = selectedIdx !== null ? results[selectedIdx] : null;
 
@@ -104,18 +111,41 @@ export default function ResultsPage() {
     setEditPhysFirst(selected.parsedData.referringPhysicianFirstName);
     setEditPhysLast(selected.parsedData.referringPhysicianLastName);
     setEditPhysCred(selected.parsedData.referringPhysicianCredential);
-    setEditFacility(selected.parsedData.facilityName);
+    const matchedFac = facilities.find(f => f.name === selected.parsedData.facilityName || f.id === selected.parsedData.facilityId);
+    setEditFacility(matchedFac?.name || selected.parsedData.facilityName);
+    setEditFacilityId(matchedFac?.id || "");
     setEditTestName(selected.parsedData.testName);
     setEditPatientFirst(selected.parsedData.patientFirstName);
     setEditPatientLast(selected.parsedData.patientLastName);
+    setEditPatientGender(selected.parsedData.patientGender || "U");
     setEditMode(true);
   };
 
   const applyProviderSelect = (npi: string) => {
     const prov = providers.find((p) => p.npi === npi);
-    if (prov) {
-      setEditPhysNPI(prov.npi); setEditPhysFirst(prov.firstName); setEditPhysLast(prov.lastName); setEditPhysCred(prov.credential);
+    if (!prov) return;
+    setEditPhysNPI(prov.npi);
+    setEditPhysFirst(prov.firstName);
+    setEditPhysLast(prov.lastName);
+    setEditPhysCred(prov.credential);
+    // Auto-set facility from provider's linked facilityId
+    if (prov.facilityId) {
+      const fac = facilities.find(f => f.id === prov.facilityId);
+      if (fac) {
+        setEditFacility(fac.name);
+        setEditFacilityId(fac.id);
+        // Auto-set EMR from facility's linked emrClientId
+        if (fac.emrClientId) setEmrType(fac.emrClientId);
+      }
     }
+  };
+
+  const applyFacilitySelect = (facilityId: string) => {
+    const fac = facilities.find(f => f.id === facilityId);
+    if (!fac) return;
+    setEditFacility(fac.name);
+    setEditFacilityId(fac.id);
+    if (fac.emrClientId) setEmrType(fac.emrClientId);
   };
 
   const regenerateHL7 = async () => {
@@ -127,15 +157,23 @@ export default function ResultsPage() {
       updatedParsed.referringPhysicianLastName = editPhysLast;
       updatedParsed.referringPhysicianCredential = editPhysCred;
       updatedParsed.facilityName = editFacility;
+      updatedParsed.facilityId = editFacilityId;
       updatedParsed.testName = editTestName;
       updatedParsed.patientFirstName = editPatientFirst;
       updatedParsed.patientLastName = editPatientLast;
+      updatedParsed.patientGender = editPatientGender;
+      const cpt = cptCodes.find(c => c.shortName === editTestName || c.description === editTestName || c.code === editTestName);
+      if (cpt) { updatedParsed.cptCode = cpt.code; updatedParsed.testDescription = cpt.description; }
     }
     
     try {
       const res = await fetch("/api/generate-hl7", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parsedData: updatedParsed }),
+        body: JSON.stringify({
+          parsedData: updatedParsed,
+          saveToDb: true,
+          resultId: selected.id,
+        }),
       });
       const data = await res.json();
       const updated = [...results];
@@ -158,26 +196,44 @@ export default function ResultsPage() {
           hl7Content: selected.hl7Content,
           emrType,
           fileName: `${selected.parsedData.patientLastName}_${selected.parsedData.patientFirstName}_HL7.txt`,
+          parsedData: selected.parsedData,
+          resultId: selected.id,
         }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (!res.ok) {
+        // Mark result as failed in UI immediately — no refresh needed
         const updated = [...results];
-        updated[selectedIdx] = { ...updated[selectedIdx], status: "sent", emrType, sentAt: new Date().toISOString() };
+        updated[selectedIdx] = { ...updated[selectedIdx], status: "failed" };
         setResults(updated);
+        showToast(data.error || "Send failed", "error");
+        return;
+      }
+      if (data.success) {
+        // Remove from the pending/failed list — it's been delivered
+        const updated = results.filter((_, i) => i !== selectedIdx);
+        setResults(updated);
+        setSelectedIdx(updated.length > 0 ? Math.min(selectedIdx, updated.length - 1) : null);
         showToast("Sent to EMR successfully");
       }
     } catch {
-      showToast("Send failed", "error");
+      const updated = [...results];
+      updated[selectedIdx] = { ...updated[selectedIdx], status: "failed" };
+      setResults(updated);
+      showToast("Network error — could not reach server", "error");
+    } finally {
+      setSending(false);
     }
-    setSending(false);
   };
 
-  const removeResult = (idx: number) => {
+  const removeResult = async (idx: number) => {
+    const target = results[idx];
+    if (target) {
+      await fetch(`/api/results?id=${target.id}`, { method: "DELETE" });
+    }
     const updated = results.filter((_, i) => i !== idx);
     setResults(updated);
-    sessionStorage.setItem("parsedResults", JSON.stringify(updated.map(r => r.parsedData)));
-    setSelectedIdx(updated.length > 0 ? 0 : null);
+    setSelectedIdx(updated.length > 0 ? Math.min(idx, updated.length - 1) : null);
   };
 
   return (
@@ -203,7 +259,7 @@ export default function ResultsPage() {
           <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 20 }}>
             {/* List */}
             <div>
-              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Pending Results ({results.length})</h3>
+              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Pending Results ({results.filter(r => r.status !== "sent").length})</h3>
               {results.map((r, i) => (
                 <div
                   key={r.id} className="card"
@@ -214,7 +270,10 @@ export default function ResultsPage() {
                     <span style={{ fontSize: 13, fontWeight: 600 }}>
                       {r.parsedData.patientLastName || "?"}, {r.parsedData.patientFirstName || "?"}
                     </span>
-                    <span className={`badge ${r.status === "sent" ? "badge-success" : "badge-warning"}`}>{r.status}</span>
+                    <span className={`badge ${
+                        r.status === "sent" ? "badge-success"
+                        : r.status === "failed" ? "badge-danger"
+                        : "badge-warning"}`}>{r.status}</span>
                   </div>
                   <div className="text-muted text-xs flex justify-between">
                     <span className="truncate" style={{maxWidth: 180}}>{r.parsedData.testName || "Unknown Test"}</span>
@@ -260,9 +319,17 @@ export default function ResultsPage() {
                             <label className="form-label">Patient Last Name</label>
                             <input className="form-input" value={editPatientLast} onChange={(e) => setEditPatientLast(e.target.value)} />
                           </div>
+                          <div className="form-group w-full" style={{ gridColumn: "1/-1" }}>
+                            <label className="form-label">Patient Gender</label>
+                            <select className="form-select" value={editPatientGender} onChange={(e) => setEditPatientGender(e.target.value)}>
+                              <option value="U">Unknown</option>
+                              <option value="M">Male</option>
+                              <option value="F">Female</option>
+                            </select>
+                          </div>
                           <div className="form-group" style={{gridColumn: "1/-1"}}>
                             <label className="form-label">Select Saved Physician</label>
-                            <select className="form-select" onChange={(e) => applyProviderSelect(e.target.value)}>
+                            <select className="form-select" value={editPhysNPI} onChange={(e) => applyProviderSelect(e.target.value)}>
                               <option value="">Custom Entry...</option>
                               {providers.map(p => <option key={p.npi} value={p.npi}>{p.firstName} {p.lastName} ({p.npi})</option>)}
                             </select>
@@ -281,14 +348,23 @@ export default function ResultsPage() {
                           </div>
                           <div className="form-group w-full">
                             <label className="form-label">Facility</label>
-                            <select className="form-select" value={editFacility} onChange={(e) => setEditFacility(e.target.value)}>
+                            <select className="form-select" value={editFacilityId} onChange={(e) => applyFacilitySelect(e.target.value)}>
                               <option value="">Select Facility...</option>
-                              {facilities.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                              {facilities.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                             </select>
                           </div>
                           <div className="form-group" style={{gridColumn: "1/-1"}}>
                             <label className="form-label">Test / Study Name</label>
-                            <input className="form-input" value={editTestName} onChange={(e) => setEditTestName(e.target.value)} />
+                            <select className="form-select" value={editTestName} onChange={(e) => setEditTestName(e.target.value)}>
+                              <option value="">Select CPT / Study...</option>
+                              {cptCodes.map(c => (
+                                <option key={c.code} value={c.shortName}>{c.code} — {c.shortName} ({c.description})</option>
+                              ))}
+                              {/* Keep current value selectable if it doesn't match a CPT */}
+                              {editTestName && !cptCodes.some(c => c.shortName === editTestName) && (
+                                <option value={editTestName}>{editTestName}</option>
+                              )}
+                            </select>
                           </div>
                         </div>
                         <div className="flex gap-2 mt-4">
