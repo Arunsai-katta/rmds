@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from "uuid";
 import { ParsedPDFResult } from "./types";
 import dbConnect from "./dbConnect";
 import FacilityModel from "./models/Facility";
+import ProviderModel from "./models/Provider";
 
 function formatHL7Timestamp(date?: Date): string {
   const d = date || new Date();
@@ -131,16 +132,30 @@ export async function buildHL7FromParsedResult(
   let facility: any = null;
   try {
     await dbConnect();
-    const searchId = overrides?.facilityCompanyId || parsed.facilityId;
-    const searchName = overrides?.facilityName || parsed.facilityName;
-    if (searchId) {
-      facility = await FacilityModel.findOne({ $or: [{ companyId: searchId }, { id: searchId }] }).lean();
+
+    // 1. Look up the provider by NPI to get their linked facilityId
+    const npi = overrides?.physicianNPI || parsed.referringPhysicianNPI;
+    let facilityId: string | undefined;
+    if (npi) {
+      const provider = await ProviderModel.findOne({ npi }).lean() as any;
+      if (provider?.facilityId) {
+        facilityId = provider.facilityId;
+        console.log(`[buildHL7] Found provider NPI=${npi} -> facilityId="${facilityId}"`);
+      }
     }
-    if (!facility && searchName) {
-      facility = await FacilityModel.findOne({ name: searchName }).lean();
+
+    // 2. Override facilityId can still be passed explicitly (e.g. from edit form)
+    facilityId = overrides?.facilityCompanyId || facilityId;
+
+    // 3. Load the facility record
+    if (facilityId) {
+      facility = await FacilityModel.findOne({ $or: [{ id: facilityId }, { companyId: facilityId }] }).lean();
+    }
+    if (!facility) {
+      console.warn(`[buildHL7] No facility found for facilityId="${facilityId}" — HL7 facility fields will be empty`);
     }
   } catch (e) {
-    console.error("Error querying facility from DB:", e);
+    console.error("Error querying provider/facility from DB:", e);
   }
 
   const input: HL7GeneratorInput = {
@@ -156,9 +171,9 @@ export async function buildHL7FromParsedResult(
     physicianCredential:
       overrides?.physicianCredential || parsed.referringPhysicianCredential || "NP",
     facilityCompanyId:
-      overrides?.facilityCompanyId || facility?.companyId || parsed.facilityId || "UNKNOWN",
+      facility?.companyId || facility?.id || overrides?.facilityCompanyId || "UNKNOWN",
     facilityName:
-      overrides?.facilityName || facility?.name || parsed.facilityName || "Unknown Facility",
+      facility?.name || overrides?.facilityName || "Unknown Facility",
     facilityAddress: overrides?.facilityAddress || facility?.address || "",
     facilityCity: overrides?.facilityCity || facility?.city || "",
     facilityState: overrides?.facilityState || facility?.state || "",
