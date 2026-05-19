@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { HL7Result, EMRClient } from "@/lib/types";
 
 export default function UploadedResultsPage() {
@@ -8,6 +8,10 @@ export default function UploadedResultsPage() {
   const [emrClients, setEmrClients] = useState<EMRClient[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hl7LoadingId, setHl7LoadingId] = useState<string | null>(null);
+  const resultsRef = useRef(results);
+  useEffect(() => { resultsRef.current = results; }, [results]);
+  const fetchedIdsRef = useRef<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
@@ -39,6 +43,27 @@ export default function UploadedResultsPage() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Lazy-load hl7Content only for the selected result
+  useEffect(() => {
+    if (selectedIdx === null) return;
+    const r = paginated[selectedIdx];
+    if (!r || fetchedIdsRef.current.has(r.id)) return;
+    fetchedIdsRef.current.add(r.id);
+    setHl7LoadingId(r.id);
+    fetch(`/api/results?id=${r.id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setResults((prev) =>
+          prev.map((item) =>
+            item.id === r.id ? { ...item, hl7Content: data.hl7Content || "" } : item
+          )
+        );
+      })
+      .catch(() => { fetchedIdsRef.current.delete(r.id); })
+      .finally(() => setHl7LoadingId(null));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIdx]);
 
   const filtered = results.filter((r) => {
     if (!search) return true;
@@ -224,33 +249,37 @@ export default function UploadedResultsPage() {
                 {/* HL7 preview */}
                 <div className="card" style={{ background: "var(--bg-secondary)" }}>
                   <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>HL7 Message</h4>
-                  <div
-                    className="hl7-preview"
-                    style={{ height: 320, overflowY: "auto", fontSize: 12 }}
-                  >
-                    {selected.hl7Content
-                      ? selected.hl7Content
-                          .split(/\r?\n/)
-                          .filter(Boolean)
-                          .map((line, i) => {
-                            let cls = "";
-                            if (line.startsWith("MSH")) cls = "seg-msh";
-                            else if (line.startsWith("PID")) cls = "seg-pid";
-                            else if (line.startsWith("PV1")) cls = "seg-pv1";
-                            else if (line.startsWith("OBR")) cls = "seg-obr";
-                            else if (line.startsWith("OBX")) cls = "seg-obx";
-                            const display =
-                              line.startsWith("OBX|2|ED") && line.length > 80
-                                ? line.substring(0, 70) + "... [base64 data]"
-                                : line;
-                            return (
-                              <div key={i} className={cls}>
-                                {display}
-                              </div>
-                            );
-                          })
-                      : <span style={{ color: "var(--text-muted)" }}>No HL7 content stored.</span>}
-                  </div>
+                  {hl7LoadingId === selected.id ? (
+                    <div style={{ color: "var(--text-muted)", padding: "16px 0", fontSize: 13 }}>⏳ Loading HL7 content...</div>
+                  ) : (
+                    <div
+                      className="hl7-preview"
+                      style={{ height: 320, overflowY: "auto", fontSize: 12 }}
+                    >
+                      {selected.hl7Content
+                        ? selected.hl7Content
+                            .split(/\r?\n/)
+                            .filter(Boolean)
+                            .map((line, i) => {
+                              let cls = "";
+                              if (line.startsWith("MSH")) cls = "seg-msh";
+                              else if (line.startsWith("PID")) cls = "seg-pid";
+                              else if (line.startsWith("PV1")) cls = "seg-pv1";
+                              else if (line.startsWith("OBR")) cls = "seg-obr";
+                              else if (line.startsWith("OBX")) cls = "seg-obx";
+                              const display =
+                                line.startsWith("OBX|2|ED") && line.length > 80
+                                  ? line.substring(0, 70) + "... [base64 data]"
+                                  : line;
+                              return (
+                                <div key={i} className={cls}>
+                                  {display}
+                                </div>
+                              );
+                            })
+                        : <span style={{ color: "var(--text-muted)" }}>No HL7 content stored.</span>}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

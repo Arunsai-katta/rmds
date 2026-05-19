@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Provider, Facility, EMRClient, ParsedPDFResult, HL7Result, CPTMapping } from "@/lib/types";
 
 function HL7Highlight({ content }: { content: string }) {
@@ -43,6 +43,11 @@ export default function ResultsPage() {
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
 
   // Editable fields
+  const [hl7LoadingId, setHl7LoadingId] = useState<string | null>(null);
+  const resultsRef = useRef(results);
+  useEffect(() => { resultsRef.current = results; }, [results]);
+  const fetchedIdsRef = useRef<Set<string>>(new Set());
+
   const [editPhysNPI, setEditPhysNPI] = useState("");
   const [editPhysFirst, setEditPhysFirst] = useState("");
   const [editPhysLast, setEditPhysLast] = useState("");
@@ -93,6 +98,26 @@ export default function ResultsPage() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Lazy-load hl7Content only for the selected result
+  useEffect(() => {
+    if (selectedIdx === null) return;
+    const r = resultsRef.current[selectedIdx];
+    if (!r || fetchedIdsRef.current.has(r.id)) return;
+    fetchedIdsRef.current.add(r.id);
+    setHl7LoadingId(r.id);
+    fetch(`/api/results?id=${r.id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setResults((prev) =>
+          prev.map((item) =>
+            item.id === r.id ? { ...item, hl7Content: data.hl7Content || "" } : item
+          )
+        );
+      })
+      .catch(() => { fetchedIdsRef.current.delete(r.id); })
+      .finally(() => setHl7LoadingId(null));
+  }, [selectedIdx]);
 
   // Auto-set Target EMR based on the selected result's facility
   useEffect(() => {
@@ -238,6 +263,14 @@ export default function ResultsPage() {
 
   const handleSend = async () => {
     if (selectedIdx === null || !selected || !emrType) return;
+    if (hl7LoadingId === selected.id) {
+      showToast("HL7 content is still loading, please wait", "error");
+      return;
+    }
+    if (!selected.hl7Content) {
+      showToast("No HL7 content available — try regenerating", "error");
+      return;
+    }
     const errors = validateBeforeSend(selected);
     if (errors.length > 0) {
       setValidationErrors(errors);
@@ -461,7 +494,11 @@ export default function ResultsPage() {
                     ) : (
                       <div className="card" style={{background: "var(--bg-secondary)"}}>
                         <h4 className="mb-4" style={{fontSize: 14, fontWeight: 600}}>HL7 Message Preview</h4>
-                        <HL7Highlight content={selected.hl7Content} />
+                        {hl7LoadingId === selected.id ? (
+                          <div style={{ color: "var(--text-muted)", padding: "16px 0", fontSize: 13 }}>⏳ Loading HL7 content...</div>
+                        ) : (
+                          <HL7Highlight content={selected.hl7Content} />
+                        )}
                       </div>
                     )}
                   </div>
