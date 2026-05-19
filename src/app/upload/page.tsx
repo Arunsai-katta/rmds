@@ -108,6 +108,7 @@ export default function UploadPage() {
     if (newResults.length > 0) {
       setResults(prev => [...prev, ...newResults]);
       setFiles(prev => prev.filter(f => f.status !== "done"));
+      if (inputRef.current) inputRef.current.value = "";
       showToast(`Parsed ${newResults.length} file(s) successfully`);
     }
   };
@@ -143,12 +144,12 @@ export default function UploadPage() {
             <div className="flex items-center justify-between mb-4">
               <h3 style={{ fontSize: 15, fontWeight: 700 }}>File Queue ({files.length})</h3>
               <div className="flex gap-2">
-                <button className="btn btn-danger btn-sm" onClick={() => setFiles([])}>Clear</button>
+                <button className="btn btn-danger btn-sm" onClick={() => { setFiles([]); if (inputRef.current) inputRef.current.value = ""; }}>Clear</button>
                 <button className="btn btn-primary" onClick={handleParseAll}>Process Files</button>
               </div>
             </div>
-            {files.map((f, i) => (
-              <div key={i} className="flex items-center justify-between" style={{ padding: "8px 0", borderBottom: "1px solid var(--border-color)" }}>
+            {files.map((f) => (
+              <div key={f.id} className="flex items-center justify-between" style={{ padding: "8px 0", borderBottom: "1px solid var(--border-color)" }}>
                 <span className="text-sm flex items-center gap-2">
                   📄 {f.file.name} 
                   {f.status === "uploading" && <span className="loading-spinner" style={{width: 14, height: 14}}/>}
