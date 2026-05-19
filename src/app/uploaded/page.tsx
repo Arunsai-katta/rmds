@@ -66,6 +66,16 @@ export default function UploadedResultsPage() {
     return new Date(iso).toLocaleString();
   };
 
+  const openPdfInNewTab = (base64: string) => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  };
+
   return (
     <>
       <div className="page-header flex items-center justify-between">
@@ -166,9 +176,17 @@ export default function UploadedResultsPage() {
                     {selected.parsedData.patientLastName || "Unknown"},{" "}
                     {selected.parsedData.patientFirstName || "Unknown"}
                   </h3>
-                  <span className="badge badge-success" style={{ fontSize: 13, padding: "6px 14px" }}>
-                    ✓ Sent
-                  </span>
+                  <div className="flex gap-2 items-center">
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => openPdfInNewTab(selected.parsedData.pdfBase64)}
+                    >
+                      📄 View Original PDF
+                    </button>
+                    <span className="badge badge-success" style={{ fontSize: 13, padding: "6px 14px" }}>
+                      ✓ Sent
+                    </span>
+                  </div>
                 </div>
 
                 {/* Info grid */}
