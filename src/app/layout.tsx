@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import NavLinks from "./NavLinks";
 
 export const metadata: Metadata = {
   title: "RMDS HL7 Results Manager",
@@ -20,9 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
             </div>
             <nav className="sidebar-nav">
-              <a href="/mappings" id="nav-mappings"><span className="nav-icon">🔗</span> Mapping Data</a>
-              <a href="/upload" id="nav-upload"><span className="nav-icon">📤</span> Upload Results</a>
-              <a href="/results" id="nav-results"><span className="nav-icon">🚀</span> Send Results</a>
+              <NavLinks />
             </nav>
           </aside>
           <main className="main-content">{children}</main>

@@ -60,15 +60,60 @@ export default function MappingDataPage() {
   const [modalType, setModalType] = useState<"provider" | "facility" | "emr" | "cpt">("provider");
   const [editId, setEditId] = useState<string | null>(null);
   const [formData, setFormData] = useState<any>({});
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   const openModal = (type: typeof modalType, item?: any) => {
     setModalType(type);
     setEditId(item?.id || null);
     setFormData(item || {});
+    setFormErrors({});
     setModalOpen(true);
   };
 
+  const req = (label: string) => <> <span style={{ color: "var(--danger)" }}>*</span></>;  // required marker helper
+
+  const validateModal = (): boolean => {
+    const errs: Record<string, string> = {};
+    const f = formData;
+    const r = (v?: string) => !v?.trim();
+    if (modalType === "provider") {
+      if (r(f.firstName) && r(f.lastName) && r(f.name)) errs.name = "Full name or first/last name is required";
+      if (r(f.npi)) errs.npi = "NPI is required";
+      if (!f.facilityId) errs.facilityId = "Facility is required";
+    }
+    if (modalType === "facility") {
+      if (r(f.name)) errs.name = "Facility name is required";
+      if (r(f.companyId)) errs.companyId = "Company ID is required";
+      if (!f.emrClientId) errs.emrClientId = "EMR Client is required";
+    }
+    if (modalType === "emr") {
+      if (r(f.name)) errs.name = "EMR name is required";
+      if (f.connectionType === "sftp" || !f.connectionType || f.connectionType === "api") {
+        if (f.connectionType === "sftp") {
+          if (r(f.sftpHost)) errs.sftpHost = "Host is required";
+          if (r(f.sftpPort)) errs.sftpPort = "Port is required";
+          if (r(f.sftpUser)) errs.sftpUser = "Username is required";
+          if (r(f.sftpPass)) errs.sftpPass = "Password / Key is required";
+          if (r(f.sftpFolder)) errs.sftpFolder = "Upload folder is required";
+        } else {
+          if (r(f.apiUrl)) errs.apiUrl = "Endpoint URL is required";
+          if (r(f.authToken)) errs.authToken = "Auth token is required";
+        }
+      }
+    }
+    if (modalType === "cpt") {
+      if (r(f.code)) errs.code = "CPT code is required";
+      if (r(f.shortName)) errs.shortName = "Short name is required";
+      if (r(f.description)) errs.description = "Description is required";
+      const kw = Array.isArray(f.keywords) ? f.keywords.join(",") : f.keywords || "";
+      if (!kw.trim()) errs.keywords = "At least one keyword is required";
+    }
+    setFormErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
   const submitModal = async () => {
+    if (!validateModal()) return;
     try {
       if (modalType === "provider") await handleSave("/api/providers", formData, editId || undefined);
       if (modalType === "facility") await handleSave("/api/facilities", formData, editId || undefined);
@@ -249,8 +294,9 @@ export default function MappingDataPage() {
             {modalType === "provider" && (
               <>
                 <div className="form-group">
-                  <label className="form-label">Full Name</label>
-                  <input className="form-input" value={formData.name || ""} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                  <label className="form-label">Full Name </label>
+                  <input className="form-input" style={formErrors.name ? {borderColor:"var(--danger)"} : {}} value={formData.name || ""} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                  {formErrors.name && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.name}</span>}
                 </div>
                 <div className="flex gap-4">
                   <div className="form-group w-full">
@@ -264,8 +310,9 @@ export default function MappingDataPage() {
                 </div>
                 <div className="flex gap-4">
                   <div className="form-group w-full">
-                    <label className="form-label">NPI</label>
-                    <input className="form-input" value={formData.npi || ""} onChange={(e) => setFormData({...formData, npi: e.target.value})} />
+                    <label className="form-label">NPI <span style={{color:"var(--danger)"}}>*</span></label>
+                    <input className="form-input" style={formErrors.npi ? {borderColor:"var(--danger)"} : {}} value={formData.npi || ""} onChange={(e) => setFormData({...formData, npi: e.target.value})} />
+                    {formErrors.npi && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.npi}</span>}
                   </div>
                   <div className="form-group w-full">
                     <label className="form-label">Credential</label>
@@ -273,11 +320,12 @@ export default function MappingDataPage() {
                   </div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Facility</label>
-                  <select className="form-select" value={formData.facilityId || ""} onChange={(e) => setFormData({...formData, facilityId: e.target.value})}>
+                  <label className="form-label">Facility <span style={{color:"var(--danger)"}}>*</span></label>
+                  <select className="form-select" style={formErrors.facilityId ? {borderColor:"var(--danger)"} : {}} value={formData.facilityId || ""} onChange={(e) => setFormData({...formData, facilityId: e.target.value})}>
                     <option value="">Select facility...</option>
                     {facilities.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                   </select>
+                  {formErrors.facilityId && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.facilityId}</span>}
                 </div>
               </>
             )}
@@ -285,12 +333,14 @@ export default function MappingDataPage() {
             {modalType === "facility" && (
               <>
                 <div className="form-group">
-                  <label className="form-label">Facility Name</label>
-                  <input className="form-input" value={formData.name || ""} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                  <label className="form-label">Facility Name <span style={{color:"var(--danger)"}}>*</span></label>
+                  <input className="form-input" style={formErrors.name ? {borderColor:"var(--danger)"} : {}} value={formData.name || ""} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                  {formErrors.name && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.name}</span>}
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Company ID (HL7 MSH.6)</label>
-                  <input className="form-input" value={formData.companyId || ""} onChange={(e) => setFormData({...formData, companyId: e.target.value})} />
+                  <label className="form-label">Company ID (HL7 MSH.6) <span style={{color:"var(--danger)"}}>*</span></label>
+                  <input className="form-input" style={formErrors.companyId ? {borderColor:"var(--danger)"} : {}} value={formData.companyId || ""} onChange={(e) => setFormData({...formData, companyId: e.target.value})} />
+                  {formErrors.companyId && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.companyId}</span>}
                 </div>
                 <div className="form-group">
                   <label className="form-label">Address</label>
@@ -311,11 +361,12 @@ export default function MappingDataPage() {
                   </div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">EMR Client</label>
-                  <select className="form-select" value={formData.emrClientId || ""} onChange={(e) => setFormData({...formData, emrClientId: e.target.value})}>
+                  <label className="form-label">EMR Client <span style={{color:"var(--danger)"}}>*</span></label>
+                  <select className="form-select" style={formErrors.emrClientId ? {borderColor:"var(--danger)"} : {}} value={formData.emrClientId || ""} onChange={(e) => setFormData({...formData, emrClientId: e.target.value})}>
                     <option value="">Select EMR...</option>
                     {emrClients.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                   </select>
+                  {formErrors.emrClientId && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.emrClientId}</span>}
                 </div>
               </>
             )}
@@ -323,11 +374,12 @@ export default function MappingDataPage() {
             {modalType === "emr" && (
               <>
                 <div className="form-group">
-                  <label className="form-label">EMR Name</label>
-                  <input className="form-input" value={formData.name || ""} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                  <label className="form-label">EMR Name <span style={{color:"var(--danger)"}}>*</span></label>
+                  <input className="form-input" style={formErrors.name ? {borderColor:"var(--danger)"} : {}} value={formData.name || ""} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                  {formErrors.name && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.name}</span>}
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Connection Type</label>
+                  <label className="form-label">Connection Type <span style={{color:"var(--danger)"}}>*</span></label>
                   <select className="form-select" value={formData.connectionType || "api"} onChange={(e) => setFormData({...formData, connectionType: e.target.value})}>
                     <option value="api">API</option>
                     <option value="sftp">SFTP</option>
@@ -339,39 +391,46 @@ export default function MappingDataPage() {
                     <h4 style={{ marginBottom: 12, fontSize: 13, fontWeight: 600 }}>SFTP Configuration</h4>
                     <div className="flex gap-4">
                       <div className="form-group w-full">
-                        <label className="form-label">Host</label>
-                        <input className="form-input" value={formData.sftpHost || ""} onChange={(e) => setFormData({...formData, sftpHost: e.target.value})} />
+                        <label className="form-label">Host <span style={{color:"var(--danger)"}}>*</span></label>
+                        <input className="form-input" style={formErrors.sftpHost ? {borderColor:"var(--danger)"} : {}} value={formData.sftpHost || ""} onChange={(e) => setFormData({...formData, sftpHost: e.target.value})} />
+                        {formErrors.sftpHost && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.sftpHost}</span>}
                       </div>
                       <div className="form-group" style={{ width: 100 }}>
-                        <label className="form-label">Port</label>
-                        <input className="form-input" value={formData.sftpPort || "22"} onChange={(e) => setFormData({...formData, sftpPort: e.target.value})} />
+                        <label className="form-label">Port <span style={{color:"var(--danger)"}}>*</span></label>
+                        <input className="form-input" style={formErrors.sftpPort ? {borderColor:"var(--danger)"} : {}} value={formData.sftpPort || "22"} onChange={(e) => setFormData({...formData, sftpPort: e.target.value})} />
+                        {formErrors.sftpPort && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.sftpPort}</span>}
                       </div>
                     </div>
                     <div className="flex gap-4">
                       <div className="form-group w-full">
-                        <label className="form-label">Username</label>
-                        <input className="form-input" value={formData.sftpUser || ""} onChange={(e) => setFormData({...formData, sftpUser: e.target.value})} />
+                        <label className="form-label">Username <span style={{color:"var(--danger)"}}>*</span></label>
+                        <input className="form-input" style={formErrors.sftpUser ? {borderColor:"var(--danger)"} : {}} value={formData.sftpUser || ""} onChange={(e) => setFormData({...formData, sftpUser: e.target.value})} />
+                        {formErrors.sftpUser && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.sftpUser}</span>}
                       </div>
                       <div className="form-group w-full">
-                        <label className="form-label">Password / Key</label>
-                        <input className="form-input" type="password" value={formData.sftpPass || ""} onChange={(e) => setFormData({...formData, sftpPass: e.target.value})} />
+                        <label className="form-label">Password / Key <span style={{color:"var(--danger)"}}>*</span></label>
+                        <input className="form-input" type="password" style={formErrors.sftpPass ? {borderColor:"var(--danger)"} : {}} value={formData.sftpPass || ""} onChange={(e) => setFormData({...formData, sftpPass: e.target.value})} />
+                        {formErrors.sftpPass && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.sftpPass}</span>}
                       </div>
                     </div>
                     <div className="form-group mt-2">
-                      <label className="form-label">Upload Folder (Path)</label>
-                      <input className="form-input" value={formData.sftpFolder || ""} placeholder="/upload/results" onChange={(e) => setFormData({...formData, sftpFolder: e.target.value})} />
+                      <label className="form-label">Upload Folder (Path) <span style={{color:"var(--danger)"}}>*</span></label>
+                      <input className="form-input" style={formErrors.sftpFolder ? {borderColor:"var(--danger)"} : {}} value={formData.sftpFolder || ""} placeholder="/upload/results" onChange={(e) => setFormData({...formData, sftpFolder: e.target.value})} />
+                      {formErrors.sftpFolder && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.sftpFolder}</span>}
                     </div>
                   </div>
                 ) : (
                   <div className="card mt-4" style={{ padding: 16 }}>
                     <h4 style={{ marginBottom: 12, fontSize: 13, fontWeight: 600 }}>API Configuration</h4>
                     <div className="form-group">
-                      <label className="form-label">Endpoint URL</label>
-                      <input className="form-input" value={formData.apiUrl || ""} placeholder="https://api.emr.com/v1/results" onChange={(e) => setFormData({...formData, apiUrl: e.target.value})} />
+                      <label className="form-label">Endpoint URL <span style={{color:"var(--danger)"}}>*</span></label>
+                      <input className="form-input" style={formErrors.apiUrl ? {borderColor:"var(--danger)"} : {}} value={formData.apiUrl || ""} placeholder="https://api.emr.com/v1/results" onChange={(e) => setFormData({...formData, apiUrl: e.target.value})} />
+                      {formErrors.apiUrl && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.apiUrl}</span>}
                     </div>
                     <div className="form-group">
-                      <label className="form-label">Auth Token</label>
-                      <input className="form-input" value={formData.authToken || ""} onChange={(e) => setFormData({...formData, authToken: e.target.value})} />
+                      <label className="form-label">Auth Token <span style={{color:"var(--danger)"}}>*</span></label>
+                      <input className="form-input" style={formErrors.authToken ? {borderColor:"var(--danger)"} : {}} value={formData.authToken || ""} onChange={(e) => setFormData({...formData, authToken: e.target.value})} />
+                      {formErrors.authToken && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.authToken}</span>}
                     </div>
                   </div>
                 )}
@@ -382,32 +441,37 @@ export default function MappingDataPage() {
               <>
                 <div className="flex gap-4">
                   <div className="form-group" style={{ width: 140 }}>
-                    <label className="form-label">CPT Code</label>
-                    <input className="form-input" value={formData.code || ""} disabled={!!editId} onChange={(e) => setFormData({...formData, code: e.target.value})} placeholder="e.g. 71046" />
+                    <label className="form-label">CPT Code <span style={{color:"var(--danger)"}}>*</span></label>
+                    <input className="form-input" style={formErrors.code ? {borderColor:"var(--danger)"} : {}} value={formData.code || ""} disabled={!!editId} onChange={(e) => setFormData({...formData, code: e.target.value})} placeholder="e.g. 71046" />
+                    {formErrors.code && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.code}</span>}
                   </div>
                   <div className="form-group w-full">
-                    <label className="form-label">Short Name</label>
-                    <input className="form-input" value={formData.shortName || ""} onChange={(e) => setFormData({...formData, shortName: e.target.value})} placeholder="e.g. CHEST X-RAY" />
+                    <label className="form-label">Short Name <span style={{color:"var(--danger)"}}>*</span></label>
+                    <input className="form-input" style={formErrors.shortName ? {borderColor:"var(--danger)"} : {}} value={formData.shortName || ""} onChange={(e) => setFormData({...formData, shortName: e.target.value})} placeholder="e.g. CHEST X-RAY" />
+                    {formErrors.shortName && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.shortName}</span>}
                   </div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Description</label>
-                  <input className="form-input" value={formData.description || ""} onChange={(e) => setFormData({...formData, description: e.target.value})} placeholder="e.g. Chest X-Ray 2 Views" />
+                  <label className="form-label">Description <span style={{color:"var(--danger)"}}>*</span></label>
+                  <input className="form-input" style={formErrors.description ? {borderColor:"var(--danger)"} : {}} value={formData.description || ""} onChange={(e) => setFormData({...formData, description: e.target.value})} placeholder="e.g. Chest X-Ray 2 Views" />
+                  {formErrors.description && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.description}</span>}
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Keywords <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(comma-separated)</span></label>
+                  <label className="form-label">Keywords <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(comma-separated)</span> <span style={{color:"var(--danger)"}}>*</span></label>
                   <input
                     className="form-input"
+                    style={formErrors.keywords ? {borderColor:"var(--danger)"} : {}}
                     value={Array.isArray(formData.keywords) ? formData.keywords.join(", ") : formData.keywords || ""}
                     onChange={(e) => setFormData({...formData, keywords: e.target.value})}
                     placeholder="e.g. chest, x-ray, xray"
                   />
+                  {formErrors.keywords && <span style={{fontSize:11,color:"var(--danger)"}}>{formErrors.keywords}</span>}
                 </div>
               </>
             )}
 
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => { setModalOpen(false); setFormErrors({}); }}>Cancel</button>
               <button className="btn btn-primary" onClick={submitModal}>Save Data</button>
             </div>
           </div>

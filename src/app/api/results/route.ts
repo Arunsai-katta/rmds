@@ -6,12 +6,22 @@ export async function GET(req: NextRequest) {
   try {
     await dbConnect();
     const { searchParams } = new URL(req.url);
+
+    // Single result fetch by ID — returns full record including hl7Content
+    const id = searchParams.get("id");
+    if (id) {
+      const result = await ResultModel.findOne({ id }).lean();
+      if (!result) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json(result);
+    }
+
     const status = searchParams.get("status");
     // Support comma-separated values: ?status=pending,failed
     const query = status
       ? { status: { $in: status.split(",").map((s) => s.trim()) } }
       : {};
-    const results = await ResultModel.find(query).sort({ createdAt: -1 }).lean();
+    // Exclude hl7Content from list queries — large field, loaded on demand
+    const results = await ResultModel.find(query, { hl7Content: 0 }).sort({ createdAt: -1 }).lean();
     return NextResponse.json(results);
   } catch (err) {
     return NextResponse.json(

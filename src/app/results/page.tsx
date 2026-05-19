@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Provider, Facility, EMRClient, ParsedPDFResult, HL7Result, CPTMapping } from "@/lib/types";
 
 function HL7Highlight({ content }: { content: string }) {
@@ -36,11 +36,18 @@ export default function ResultsPage() {
   
   const [emrType, setEmrType] = useState("");
   const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [editMode, setEditMode] = useState(false);
-  const [viewPdf, setViewPdf] = useState(false);
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
 
   // Editable fields
+  const [hl7LoadingId, setHl7LoadingId] = useState<string | null>(null);
+  const resultsRef = useRef(results);
+  useEffect(() => { resultsRef.current = results; }, [results]);
+  const fetchedIdsRef = useRef<Set<string>>(new Set());
+
   const [editPhysNPI, setEditPhysNPI] = useState("");
   const [editPhysFirst, setEditPhysFirst] = useState("");
   const [editPhysLast, setEditPhysLast] = useState("");
@@ -57,6 +64,7 @@ export default function ResultsPage() {
   };
 
   const loadData = useCallback(async () => {
+    setLoading(true);
     try {
       const [pRes, fRes, eRes, cptRes, rRes] = await Promise.all([
         fetch("/api/providers"), fetch("/api/facilities"), fetch("/api/emr-clients"),
@@ -84,10 +92,32 @@ export default function ResultsPage() {
       if (mapped.length > 0) setSelectedIdx(0);
     } catch {
       showToast("Failed to load data", "error");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Lazy-load hl7Content only for the selected result
+  useEffect(() => {
+    if (selectedIdx === null) return;
+    const r = resultsRef.current[selectedIdx];
+    if (!r || fetchedIdsRef.current.has(r.id)) return;
+    fetchedIdsRef.current.add(r.id);
+    setHl7LoadingId(r.id);
+    fetch(`/api/results?id=${r.id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setResults((prev) =>
+          prev.map((item) =>
+            item.id === r.id ? { ...item, hl7Content: data.hl7Content || "" } : item
+          )
+        );
+      })
+      .catch(() => { fetchedIdsRef.current.delete(r.id); })
+      .finally(() => setHl7LoadingId(null));
+  }, [selectedIdx]);
 
   // Auto-set Target EMR based on the selected result's facility
   useEffect(() => {
@@ -148,8 +178,23 @@ export default function ResultsPage() {
     if (fac.emrClientId) setEmrType(fac.emrClientId);
   };
 
+  const validateEditForm = (): boolean => {
+    const errs: Record<string, string> = {};
+    const isUnk = (v: string) => !v.trim() || v.trim().toUpperCase() === "UNKNOWN";
+    if (isUnk(editPatientFirst)) errs.patientFirst = "Required and cannot be Unknown";
+    if (isUnk(editPatientLast)) errs.patientLast = "Required and cannot be Unknown";
+    if (isUnk(editPhysFirst)) errs.physFirst = "Required and cannot be Unknown";
+    if (isUnk(editPhysLast)) errs.physLast = "Required and cannot be Unknown";
+    if (isUnk(editPhysNPI)) errs.npi = "Required and cannot be Unknown";
+    if (!editFacilityId.trim()) errs.facility = "Please select a facility";
+    if (!editTestName.trim()) errs.testName = "Please select a test / study";
+    setEditErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
   const regenerateHL7 = async () => {
     if (selectedIdx === null || !selected) return;
+    if (!validateEditForm()) return;
     const updatedParsed = { ...selected.parsedData };
     if (editMode) {
       updatedParsed.referringPhysicianNPI = editPhysNPI;
@@ -180,14 +225,58 @@ export default function ResultsPage() {
       updated[selectedIdx] = { ...updated[selectedIdx], parsedData: updatedParsed, hl7Content: data.hl7Content };
       setResults(updated);
       setEditMode(false);
+      setEditErrors({});
       showToast("HL7 regenerated successfully");
     } catch {
       showToast("Failed to regenerate", "error");
     }
   };
 
+  const openPdfInNewTab = (base64: string) => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  };
+
+  const isUnknown = (v?: string) =>
+    !v?.trim() || v.trim().toUpperCase() === "UNKNOWN" || v.trim().toUpperCase() === "UNKNOWN FACILITY";
+
+  const validateBeforeSend = (r: HL7Result): string[] => {
+    const errors: string[] = [];
+    const p = r.parsedData;
+    if (!p.patientFirstName?.trim()) errors.push("Patient first name is required");
+    if (!p.patientLastName?.trim()) errors.push("Patient last name is required");
+    if (!p.patientDOB?.trim()) errors.push("Patient date of birth is required");
+    if (isUnknown(p.facilityName) && !p.facilityId?.trim()) errors.push("Sending facility is required (Unknown is not allowed)");
+    else if (isUnknown(p.facilityName)) errors.push("Sending facility name is Unknown — please assign a valid facility");
+    if (!p.referringPhysicianFirstName?.trim() && !p.referringPhysicianLastName?.trim()) errors.push("Physician name is required");
+    if (!p.referringPhysicianNPI?.trim() || p.referringPhysicianNPI.trim().toUpperCase() === "UNKNOWN")
+      errors.push("Physician NPI is required");
+    if (!p.testName?.trim()) errors.push("Test / study name is required");
+    if (!p.cptCode?.trim()) errors.push("CPT code is required");
+    return errors;
+  };
+
   const handleSend = async () => {
     if (selectedIdx === null || !selected || !emrType) return;
+    if (hl7LoadingId === selected.id) {
+      showToast("HL7 content is still loading, please wait", "error");
+      return;
+    }
+    if (!selected.hl7Content) {
+      showToast("No HL7 content available — try regenerating", "error");
+      return;
+    }
+    const errors = validateBeforeSend(selected);
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      return;
+    }
+    setValidationErrors([]);
     setSending(true);
     try {
       const res = await fetch("/api/send-hl7", {
@@ -240,6 +329,7 @@ export default function ResultsPage() {
     <>
       <div className="page-header flex items-center justify-between">
         <div><h2>Review & Send Results</h2><p>Validate HL7 data against original PDF and push to EMR</p></div>
+
         <div className="flex gap-3 items-center">
           <label className="form-label" style={{ margin: 0 }}>Target EMR:</label>
           <select className="form-select" style={{ width: 200 }} value={emrType} onChange={(e) => setEmrType(e.target.value)}>
@@ -249,7 +339,13 @@ export default function ResultsPage() {
       </div>
 
       <div className="page-body">
-        {results.length === 0 ? (
+        {loading ? (
+          <div className="empty-state">
+            <div className="empty-icon" style={{ fontSize: 36 }}>⏳</div>
+            <h3>Loading Results...</h3>
+            <p>Fetching pending results from database.</p>
+          </div>
+        ) : results.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📋</div>
             <h3>No Results Ready</h3>
@@ -264,7 +360,7 @@ export default function ResultsPage() {
                 <div
                   key={r.id} className="card"
                   style={{ marginBottom: 8, cursor: "pointer", borderColor: i === selectedIdx ? "var(--accent)" : undefined, padding: 12 }}
-                  onClick={() => { setSelectedIdx(i); setEditMode(false); setViewPdf(false); }}
+                  onClick={() => { setSelectedIdx(i); setEditMode(false); setEditErrors({}); }}
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span style={{ fontSize: 13, fontWeight: 600 }}>
@@ -291,10 +387,10 @@ export default function ResultsPage() {
                     {selected.parsedData.patientLastName || "Unknown"}, {selected.parsedData.patientFirstName || "Unknown"}
                   </h3>
                   <div className="flex gap-2">
-                    <button className={`btn ${viewPdf ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewPdf(!viewPdf)}>
-                      📄 {viewPdf ? "Hide PDF" : "View Original PDF"}
+                    <button className="btn btn-secondary" onClick={() => openPdfInNewTab(selected.parsedData.pdfBase64)}>
+                      📄 View Original PDF
                     </button>
-                    {!editMode && <button className="btn btn-secondary" onClick={startEdit}>✏️ Edit Data</button>}
+                    {!editMode && <button className="btn btn-secondary" onClick={() => { startEdit(); setValidationErrors([]); setEditErrors({}); }}>✏️ Edit Data</button>}
                     {selected.status !== "sent" && (
                       <button className="btn btn-success" onClick={handleSend} disabled={sending}>
                         {sending ? "Sending..." : "🚀 Send to EMR"}
@@ -303,7 +399,24 @@ export default function ResultsPage() {
                   </div>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: viewPdf ? "1fr 1fr" : "1fr", gap: 20 }}>
+                {/* Validation errors */}
+                {validationErrors.length > 0 && (
+                  <div style={{
+                    background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)",
+                    borderRadius: "var(--radius-md)", padding: "12px 16px",
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--danger)", marginBottom: 6 }}>
+                      ⚠ Cannot send — please fix the following:
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {validationErrors.map((e) => (
+                        <li key={e} style={{ fontSize: 12.5, color: "#fca5a5", marginBottom: 2 }}>{e}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 20 }}>
                   
                   {/* Editor / Info Pane */}
                   <div>
@@ -312,19 +425,21 @@ export default function ResultsPage() {
                         <h4 className="mb-4" style={{fontSize: 14, fontWeight: 600}}>Edit Parsed Data</h4>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                           <div className="form-group w-full">
-                            <label className="form-label">Patient First Name</label>
-                            <input className="form-input" value={editPatientFirst} onChange={(e) => setEditPatientFirst(e.target.value)} />
+                            <label className="form-label">Patient First Name <span style={{color:"var(--danger)"}}>*</span></label>
+                            <input className="form-input" style={editErrors.patientFirst ? {borderColor:"var(--danger)"} : {}} value={editPatientFirst} onChange={(e) => setEditPatientFirst(e.target.value)} />
+                            {editErrors.patientFirst && <span style={{fontSize:11,color:"var(--danger)"}}>{editErrors.patientFirst}</span>}
                           </div>
                           <div className="form-group w-full">
-                            <label className="form-label">Patient Last Name</label>
-                            <input className="form-input" value={editPatientLast} onChange={(e) => setEditPatientLast(e.target.value)} />
+                            <label className="form-label">Patient Last Name <span style={{color:"var(--danger)"}}>*</span></label>
+                            <input className="form-input" style={editErrors.patientLast ? {borderColor:"var(--danger)"} : {}} value={editPatientLast} onChange={(e) => setEditPatientLast(e.target.value)} />
+                            {editErrors.patientLast && <span style={{fontSize:11,color:"var(--danger)"}}>{editErrors.patientLast}</span>}
                           </div>
                           <div className="form-group w-full" style={{ gridColumn: "1/-1" }}>
-                            <label className="form-label">Patient Gender</label>
+                            <label className="form-label">Patient Gender <span style={{color:"var(--danger)"}}>*</span></label>
                             <select className="form-select" value={editPatientGender} onChange={(e) => setEditPatientGender(e.target.value)}>
-                              <option value="U">Unknown</option>
                               <option value="M">Male</option>
                               <option value="F">Female</option>
+                              <option value="U">Unknown</option>
                             </select>
                           </div>
                           <div className="form-group" style={{gridColumn: "1/-1"}}>
@@ -335,36 +450,40 @@ export default function ResultsPage() {
                             </select>
                           </div>
                           <div className="form-group w-full">
-                            <label className="form-label">Physician First Name</label>
-                            <input className="form-input" value={editPhysFirst} onChange={(e) => setEditPhysFirst(e.target.value)} />
+                            <label className="form-label">Physician First Name <span style={{color:"var(--danger)"}}>*</span></label>
+                            <input className="form-input" style={editErrors.physFirst ? {borderColor:"var(--danger)"} : {}} value={editPhysFirst} onChange={(e) => setEditPhysFirst(e.target.value)} />
+                            {editErrors.physFirst && <span style={{fontSize:11,color:"var(--danger)"}}>{editErrors.physFirst}</span>}
                           </div>
                           <div className="form-group w-full">
-                            <label className="form-label">Physician Last Name</label>
-                            <input className="form-input" value={editPhysLast} onChange={(e) => setEditPhysLast(e.target.value)} />
+                            <label className="form-label">Physician Last Name <span style={{color:"var(--danger)"}}>*</span></label>
+                            <input className="form-input" style={editErrors.physLast ? {borderColor:"var(--danger)"} : {}} value={editPhysLast} onChange={(e) => setEditPhysLast(e.target.value)} />
+                            {editErrors.physLast && <span style={{fontSize:11,color:"var(--danger)"}}>{editErrors.physLast}</span>}
                           </div>
-                          <div className="form-group w-full">
-                            <label className="form-label">NPI</label>
-                            <input className="form-input" value={editPhysNPI} onChange={(e) => setEditPhysNPI(e.target.value)} />
+                          <div className="form-group w-full" style={{gridColumn:"1/-1"}}>
+                            <label className="form-label">NPI <span style={{color:"var(--danger)"}}>*</span></label>
+                            <input className="form-input" style={editErrors.npi ? {borderColor:"var(--danger)"} : {}} value={editPhysNPI} onChange={(e) => setEditPhysNPI(e.target.value)} />
+                            {editErrors.npi && <span style={{fontSize:11,color:"var(--danger)"}}>{editErrors.npi}</span>}
                           </div>
-                          <div className="form-group w-full">
-                            <label className="form-label">Facility</label>
-                            <select className="form-select" value={editFacilityId} onChange={(e) => applyFacilitySelect(e.target.value)}>
+                          <div className="form-group w-full" style={{gridColumn:"1/-1"}}>
+                            <label className="form-label">Facility <span style={{color:"var(--danger)"}}>*</span></label>
+                            <select className="form-select" style={editErrors.facility ? {borderColor:"var(--danger)"} : {}} value={editFacilityId} onChange={(e) => applyFacilitySelect(e.target.value)}>
                               <option value="">Select Facility...</option>
                               {facilities.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                             </select>
+                            {editErrors.facility && <span style={{fontSize:11,color:"var(--danger)"}}>{editErrors.facility}</span>}
                           </div>
                           <div className="form-group" style={{gridColumn: "1/-1"}}>
-                            <label className="form-label">Test / Study Name</label>
-                            <select className="form-select" value={editTestName} onChange={(e) => setEditTestName(e.target.value)}>
+                            <label className="form-label">Test / Study Name <span style={{color:"var(--danger)"}}>*</span></label>
+                            <select className="form-select" style={editErrors.testName ? {borderColor:"var(--danger)"} : {}} value={editTestName} onChange={(e) => setEditTestName(e.target.value)}>
                               <option value="">Select CPT / Study...</option>
                               {cptCodes.map(c => (
                                 <option key={c.code} value={c.shortName}>{c.code} — {c.shortName} ({c.description})</option>
                               ))}
-                              {/* Keep current value selectable if it doesn't match a CPT */}
                               {editTestName && !cptCodes.some(c => c.shortName === editTestName) && (
                                 <option value={editTestName}>{editTestName}</option>
                               )}
                             </select>
+                            {editErrors.testName && <span style={{fontSize:11,color:"var(--danger)"}}>{editErrors.testName}</span>}
                           </div>
                         </div>
                         <div className="flex gap-2 mt-4">
@@ -375,22 +494,16 @@ export default function ResultsPage() {
                     ) : (
                       <div className="card" style={{background: "var(--bg-secondary)"}}>
                         <h4 className="mb-4" style={{fontSize: 14, fontWeight: 600}}>HL7 Message Preview</h4>
-                        <HL7Highlight content={selected.hl7Content} />
+                        {hl7LoadingId === selected.id ? (
+                          <div style={{ color: "var(--text-muted)", padding: "16px 0", fontSize: 13 }}>⏳ Loading HL7 content...</div>
+                        ) : (
+                          <HL7Highlight content={selected.hl7Content} />
+                        )}
                       </div>
                     )}
                   </div>
 
-                  {/* PDF Viewer Pane */}
-                  {viewPdf && (
-                    <div style={{ border: "1px solid var(--border-color)", borderRadius: "var(--radius-md)", overflow: "hidden", height: "600px" }}>
-                      <iframe 
-                        src={`data:application/pdf;base64,${selected.parsedData.pdfBase64}#toolbar=0`} 
-                        width="100%" 
-                        height="100%" 
-                        style={{ border: "none" }}
-                      />
-                    </div>
-                  )}
+
 
                 </div>
               </div>
