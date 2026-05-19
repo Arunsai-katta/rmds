@@ -115,13 +115,12 @@ export function generateHL7(input: HL7GeneratorInput): string {
   );
 
   // OBX|2+ - Base64 encoded PDF chunks
-  const chunks = splitBase64IntoChunks(input.pdfBase64, 100);
+  const chunks = splitBase64IntoChunks(input.pdfBase64, 300);
   for (const chunk of chunks) {
     segments.push(
       `OBX|2|ED|${input.cptCode}^${input.testDescription}^CPT||${chunk}||||||F`
     );
   }
-
   return segments.join("\r\n") + "\r\n";
 }
 
