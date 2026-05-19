@@ -36,7 +36,9 @@ export default function ResultsPage() {
   
   const [emrType, setEmrType] = useState("");
   const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [editMode, setEditMode] = useState(false);
   const [viewPdf, setViewPdf] = useState(false);
 
@@ -57,6 +59,7 @@ export default function ResultsPage() {
   };
 
   const loadData = useCallback(async () => {
+    setLoading(true);
     try {
       const [pRes, fRes, eRes, cptRes, rRes] = await Promise.all([
         fetch("/api/providers"), fetch("/api/facilities"), fetch("/api/emr-clients"),
@@ -84,6 +87,8 @@ export default function ResultsPage() {
       if (mapped.length > 0) setSelectedIdx(0);
     } catch {
       showToast("Failed to load data", "error");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -186,8 +191,33 @@ export default function ResultsPage() {
     }
   };
 
+  const isUnknown = (v?: string) =>
+    !v?.trim() || v.trim().toUpperCase() === "UNKNOWN" || v.trim().toUpperCase() === "UNKNOWN FACILITY";
+
+  const validateBeforeSend = (r: HL7Result): string[] => {
+    const errors: string[] = [];
+    const p = r.parsedData;
+    if (!p.patientFirstName?.trim()) errors.push("Patient first name is required");
+    if (!p.patientLastName?.trim()) errors.push("Patient last name is required");
+    if (!p.patientDOB?.trim()) errors.push("Patient date of birth is required");
+    if (isUnknown(p.facilityName) && !p.facilityId?.trim()) errors.push("Sending facility is required (Unknown is not allowed)");
+    else if (isUnknown(p.facilityName)) errors.push("Sending facility name is Unknown — please assign a valid facility");
+    if (!p.referringPhysicianFirstName?.trim() && !p.referringPhysicianLastName?.trim()) errors.push("Physician name is required");
+    if (!p.referringPhysicianNPI?.trim() || p.referringPhysicianNPI.trim().toUpperCase() === "UNKNOWN")
+      errors.push("Physician NPI is required");
+    if (!p.testName?.trim()) errors.push("Test / study name is required");
+    if (!p.cptCode?.trim()) errors.push("CPT code is required");
+    return errors;
+  };
+
   const handleSend = async () => {
     if (selectedIdx === null || !selected || !emrType) return;
+    const errors = validateBeforeSend(selected);
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      return;
+    }
+    setValidationErrors([]);
     setSending(true);
     try {
       const res = await fetch("/api/send-hl7", {
@@ -240,6 +270,7 @@ export default function ResultsPage() {
     <>
       <div className="page-header flex items-center justify-between">
         <div><h2>Review & Send Results</h2><p>Validate HL7 data against original PDF and push to EMR</p></div>
+
         <div className="flex gap-3 items-center">
           <label className="form-label" style={{ margin: 0 }}>Target EMR:</label>
           <select className="form-select" style={{ width: 200 }} value={emrType} onChange={(e) => setEmrType(e.target.value)}>
@@ -249,7 +280,13 @@ export default function ResultsPage() {
       </div>
 
       <div className="page-body">
-        {results.length === 0 ? (
+        {loading ? (
+          <div className="empty-state">
+            <div className="empty-icon" style={{ fontSize: 36 }}>⏳</div>
+            <h3>Loading Results...</h3>
+            <p>Fetching pending results from database.</p>
+          </div>
+        ) : results.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📋</div>
             <h3>No Results Ready</h3>
@@ -294,7 +331,7 @@ export default function ResultsPage() {
                     <button className={`btn ${viewPdf ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewPdf(!viewPdf)}>
                       📄 {viewPdf ? "Hide PDF" : "View Original PDF"}
                     </button>
-                    {!editMode && <button className="btn btn-secondary" onClick={startEdit}>✏️ Edit Data</button>}
+                    {!editMode && <button className="btn btn-secondary" onClick={() => { startEdit(); setValidationErrors([]); }}>✏️ Edit Data</button>}
                     {selected.status !== "sent" && (
                       <button className="btn btn-success" onClick={handleSend} disabled={sending}>
                         {sending ? "Sending..." : "🚀 Send to EMR"}
@@ -302,6 +339,23 @@ export default function ResultsPage() {
                     )}
                   </div>
                 </div>
+
+                {/* Validation errors */}
+                {validationErrors.length > 0 && (
+                  <div style={{
+                    background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)",
+                    borderRadius: "var(--radius-md)", padding: "12px 16px",
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--danger)", marginBottom: 6 }}>
+                      ⚠ Cannot send — please fix the following:
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {validationErrors.map((e) => (
+                        <li key={e} style={{ fontSize: 12.5, color: "#fca5a5", marginBottom: 2 }}>{e}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 <div style={{ display: "grid", gridTemplateColumns: viewPdf ? "1fr 1fr" : "1fr", gap: 20 }}>
                   
