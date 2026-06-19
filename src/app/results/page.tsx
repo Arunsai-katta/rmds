@@ -44,8 +44,6 @@ export default function ResultsPage() {
 
   // Editable fields
   const [hl7LoadingId, setHl7LoadingId] = useState<string | null>(null);
-  const resultsRef = useRef(results);
-  useEffect(() => { resultsRef.current = results; }, [results]);
   const fetchedIdsRef = useRef<Set<string>>(new Set());
 
   const [editPhysNPI, setEditPhysNPI] = useState("");
@@ -99,25 +97,29 @@ export default function ResultsPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Lazy-load hl7Content only for the selected result
+  const selected = selectedIdx !== null ? results[selectedIdx] : null;
+
+  // Lazy-load hl7Content only for the selected result.
+  // Depend on selected?.id so that when the item at the same index changes
+  // (e.g. after sending the first result and the list shifts), the fetch still fires.
   useEffect(() => {
-    if (selectedIdx === null) return;
-    const r = resultsRef.current[selectedIdx];
-    if (!r || fetchedIdsRef.current.has(r.id)) return;
-    fetchedIdsRef.current.add(r.id);
-    setHl7LoadingId(r.id);
-    fetch(`/api/results?id=${r.id}`)
+    const id = selected?.id;
+    if (!id || fetchedIdsRef.current.has(id)) return;
+    fetchedIdsRef.current.add(id);
+    setHl7LoadingId(id);
+    fetch(`/api/results?id=${id}`)
       .then((res) => res.json())
       .then((data) => {
         setResults((prev) =>
           prev.map((item) =>
-            item.id === r.id ? { ...item, hl7Content: data.hl7Content || "" } : item
+            item.id === id ? { ...item, hl7Content: data.hl7Content || "" } : item
           )
         );
       })
-      .catch(() => { fetchedIdsRef.current.delete(r.id); })
+      .catch(() => { fetchedIdsRef.current.delete(id); })
       .finally(() => setHl7LoadingId(null));
-  }, [selectedIdx]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
 
   // Auto-set Target EMR based on the selected result's facility
   useEffect(() => {
@@ -132,8 +134,6 @@ export default function ResultsPage() {
     // Fallback: use emrClientId stored on the result record itself
     if (result.emrType) { setEmrType(result.emrType); return; }
   }, [selectedIdx, results, facilities]);
-
-  const selected = selectedIdx !== null ? results[selectedIdx] : null;
 
   const startEdit = () => {
     if (!selected) return;
