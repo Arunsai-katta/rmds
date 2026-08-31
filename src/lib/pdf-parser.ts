@@ -39,7 +39,7 @@ interface ExtractionResult {
 
 export function parseReportText(text: string, fileName: string = ""): ExtractionResult {
   const result: ExtractionResult = {
-    patientLastName: "", patientFirstName: "", patientDOB: "", patientGender: "U",
+    patientLastName: "", patientFirstName: "", patientDOB: "", patientGender: "",
     referringPhysicianName: "", referringPhysicianFirst: "", referringPhysicianLast: "", referringPhysicianCred: "",
     facilityName: "", testName: "", testDescription: "",
     examDate: "", confidence: 0,
@@ -89,6 +89,14 @@ export function parseReportText(text: string, fileName: string = ""): Extraction
   // DOB
   match = text.match(/(?:DATE\s*OF\s*BIRTH|DOB)\s*:\s*([\d/\-]+)/i);
   if (match) { result.patientDOB = match[1].trim(); fieldsFound++; }
+
+  // GENDER / SEX
+  match = text.match(/(?:GENDER|SEX)\s*:\s*(MALE|FEMALE|M|F)\b/i);
+  if (match) {
+    const g = match[1].trim().toUpperCase();
+    result.patientGender = g.startsWith("M") ? "M" : g.startsWith("F") ? "F" : "";
+    if (result.patientGender) fieldsFound++;
+  }
 
   // PHYSICIAN
   // Match "REFERRING PHYSICIAN: BOAHEMAA, PRISCILLA NP" or "Ref Phy: Dr. Mary Tang"

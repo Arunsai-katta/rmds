@@ -267,12 +267,17 @@ export default function UploadedResultsPage() {
                               else if (line.startsWith("PV1")) cls = "seg-pv1";
                               else if (line.startsWith("OBR")) cls = "seg-obr";
                               else if (line.startsWith("OBX")) cls = "seg-obx";
-                              const display =
-                                line.startsWith("OBX|2|ED") && line.length > 80
-                                  ? line.substring(0, 70) + "... [base64 data]"
-                                  : line;
+                              let display = line;
+                              if ((line.startsWith("OBX|") || line.includes("Base64")) && line.length > 120) {
+                                if (line.includes("^Base64^")) {
+                                  const idx = line.indexOf("^Base64^");
+                                  display = line.substring(0, idx + 8) + "... [base64 encoded PDF data]";
+                                } else {
+                                  display = line.substring(0, 90) + "... [base64 encoded PDF data]";
+                                }
+                              }
                               return (
-                                <div key={i} className={cls}>
+                                <div key={i} className={cls} style={{ wordBreak: "break-all", whiteSpace: "pre-wrap", marginBottom: 4 }}>
                                   {display}
                                 </div>
                               );

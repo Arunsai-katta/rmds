@@ -8,11 +8,12 @@ import { v4 as uuidv4 } from "uuid";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { parsedData, overrides, saveToDb, resultId: existingId } = body as {
+    const { parsedData, overrides, saveToDb, resultId: existingId, emrClientId } = body as {
       parsedData: ParsedPDFResult;
       overrides?: Record<string, string>;
       saveToDb?: boolean;
       resultId?: string;
+      emrClientId?: string;
     };
 
     if (!parsedData) {
@@ -22,17 +23,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const hl7Content = await buildHL7FromParsedResult(parsedData, overrides);
+    const combinedOverrides: Record<string, any> = {
+      ...overrides,
+      ...(emrClientId ? { emrClientId } : {}),
+    };
+
+    const hl7Content = await buildHL7FromParsedResult(parsedData, combinedOverrides);
     const messageId = existingId || `hl7-${uuidv4().substring(0, 12)}`;
 
     if (saveToDb) {
       await dbConnect();
       const fileName = `${parsedData.patientLastName || "UNKNOWN"}_${parsedData.patientFirstName || "UNKNOWN"}_HL7.txt`;
+      const emrId = emrClientId || (combinedOverrides as any).emrClientId;
       if (existingId) {
         // Update existing record (e.g. after edit + regenerate)
         await ResultModel.findOneAndUpdate(
           { id: existingId },
-          { parsedData, hl7Content, fileName, status: "pending" }
+          { parsedData, hl7Content, fileName, status: "pending", ...(emrId ? { emrClientId: emrId } : {}) }
         );
       } else {
         await ResultModel.create({
@@ -42,6 +49,7 @@ export async function POST(req: NextRequest) {
           fileName,
           status: "pending",
           createdAt: new Date(),
+          ...(emrId ? { emrClientId: emrId } : {}),
         });
       }
     }

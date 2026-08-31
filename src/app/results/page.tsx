@@ -7,7 +7,17 @@ function HL7Highlight({ content }: { content: string }) {
   if (!content) return null;
   const lines = content.split(/\r?\n/).filter(Boolean);
   return (
-    <div className="hl7-preview" style={{ height: "400px", overflowY: "auto" }}>
+    <div
+      className="hl7-preview"
+      style={{
+        maxHeight: "420px",
+        overflowY: "auto",
+        overflowX: "hidden",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-all",
+        overflowWrap: "anywhere",
+      }}
+    >
       {lines.map((line, i) => {
         let cls = "";
         if (line.startsWith("MSH")) cls = "seg-msh";
@@ -15,10 +25,22 @@ function HL7Highlight({ content }: { content: string }) {
         else if (line.startsWith("PV1")) cls = "seg-pv1";
         else if (line.startsWith("OBR")) cls = "seg-obr";
         else if (line.startsWith("OBX")) cls = "seg-obx";
-        const display = line.startsWith("OBX|2|ED") && line.length > 80
-          ? line.substring(0, 70) + "... [base64 data]"
-          : line;
-        return <div key={i} className={cls}>{display}</div>;
+
+        let display = line;
+        if ((line.startsWith("OBX|") || line.includes("Base64")) && line.length > 120) {
+          if (line.includes("^Base64^")) {
+            const idx = line.indexOf("^Base64^");
+            display = line.substring(0, idx + 8) + "... [base64 encoded PDF data]";
+          } else {
+            display = line.substring(0, 90) + "... [base64 encoded PDF data]";
+          }
+        }
+
+        return (
+          <div key={i} className={cls} style={{ wordBreak: "break-all", whiteSpace: "pre-wrap", marginBottom: 4 }}>
+            {display}
+          </div>
+        );
       })}
     </div>
   );
@@ -44,8 +66,6 @@ export default function ResultsPage() {
 
   // Editable fields
   const [hl7LoadingId, setHl7LoadingId] = useState<string | null>(null);
-  const resultsRef = useRef(results);
-  useEffect(() => { resultsRef.current = results; }, [results]);
   const fetchedIdsRef = useRef<Set<string>>(new Set());
 
   const [editPhysNPI, setEditPhysNPI] = useState("");
@@ -99,25 +119,29 @@ export default function ResultsPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Lazy-load hl7Content only for the selected result
+  const selected = selectedIdx !== null ? results[selectedIdx] : null;
+
+  // Lazy-load hl7Content only for the selected result.
+  // Depend on selected?.id so that when the item at the same index changes
+  // (e.g. after sending the first result and the list shifts), the fetch still fires.
   useEffect(() => {
-    if (selectedIdx === null) return;
-    const r = resultsRef.current[selectedIdx];
-    if (!r || fetchedIdsRef.current.has(r.id)) return;
-    fetchedIdsRef.current.add(r.id);
-    setHl7LoadingId(r.id);
-    fetch(`/api/results?id=${r.id}`)
+    const id = selected?.id;
+    if (!id || fetchedIdsRef.current.has(id)) return;
+    fetchedIdsRef.current.add(id);
+    setHl7LoadingId(id);
+    fetch(`/api/results?id=${id}`)
       .then((res) => res.json())
       .then((data) => {
         setResults((prev) =>
           prev.map((item) =>
-            item.id === r.id ? { ...item, hl7Content: data.hl7Content || "" } : item
+            item.id === id ? { ...item, hl7Content: data.hl7Content || "" } : item
           )
         );
       })
-      .catch(() => { fetchedIdsRef.current.delete(r.id); })
+      .catch(() => { fetchedIdsRef.current.delete(id); })
       .finally(() => setHl7LoadingId(null));
-  }, [selectedIdx]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
 
   // Auto-set Target EMR based on the selected result's facility
   useEffect(() => {
@@ -133,8 +157,6 @@ export default function ResultsPage() {
     if (result.emrType) { setEmrType(result.emrType); return; }
   }, [selectedIdx, results, facilities]);
 
-  const selected = selectedIdx !== null ? results[selectedIdx] : null;
-
   const startEdit = () => {
     if (!selected) return;
     setEditPhysNPI(selected.parsedData.referringPhysicianNPI);
@@ -147,7 +169,7 @@ export default function ResultsPage() {
     setEditTestName(selected.parsedData.testName);
     setEditPatientFirst(selected.parsedData.patientFirstName);
     setEditPatientLast(selected.parsedData.patientLastName);
-    setEditPatientGender(selected.parsedData.patientGender || "U");
+    setEditPatientGender(selected.parsedData.patientGender || "");
     setEditMode(true);
   };
 
@@ -183,6 +205,7 @@ export default function ResultsPage() {
     const isUnk = (v: string) => !v.trim() || v.trim().toUpperCase() === "UNKNOWN";
     if (isUnk(editPatientFirst)) errs.patientFirst = "Required and cannot be Unknown";
     if (isUnk(editPatientLast)) errs.patientLast = "Required and cannot be Unknown";
+    if (!editPatientGender.trim()) errs.patientGender = "Patient gender is mandatory";
     if (isUnk(editPhysFirst)) errs.physFirst = "Required and cannot be Unknown";
     if (isUnk(editPhysLast)) errs.physLast = "Required and cannot be Unknown";
     if (isUnk(editPhysNPI)) errs.npi = "Required and cannot be Unknown";
@@ -218,9 +241,14 @@ export default function ResultsPage() {
           parsedData: updatedParsed,
           saveToDb: true,
           resultId: selected.id,
+          emrClientId: emrType,
         }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || "Failed to regenerate", "error");
+        return;
+      }
       const updated = [...results];
       updated[selectedIdx] = { ...updated[selectedIdx], parsedData: updatedParsed, hl7Content: data.hl7Content };
       setResults(updated);
@@ -251,6 +279,7 @@ export default function ResultsPage() {
     if (!p.patientFirstName?.trim()) errors.push("Patient first name is required");
     if (!p.patientLastName?.trim()) errors.push("Patient last name is required");
     if (!p.patientDOB?.trim()) errors.push("Patient date of birth is required");
+    if (!p.patientGender?.trim()) errors.push("Patient gender is mandatory");
     if (isUnknown(p.facilityName) && !p.facilityId?.trim()) errors.push("Sending facility is required (Unknown is not allowed)");
     else if (isUnknown(p.facilityName)) errors.push("Sending facility name is Unknown — please assign a valid facility");
     if (!p.referringPhysicianFirstName?.trim() && !p.referringPhysicianLastName?.trim()) errors.push("Physician name is required");
@@ -267,10 +296,6 @@ export default function ResultsPage() {
       showToast("HL7 content is still loading, please wait", "error");
       return;
     }
-    if (!selected.hl7Content) {
-      showToast("No HL7 content available — try regenerating", "error");
-      return;
-    }
     const errors = validateBeforeSend(selected);
     if (errors.length > 0) {
       setValidationErrors(errors);
@@ -278,11 +303,32 @@ export default function ResultsPage() {
     }
     setValidationErrors([]);
     setSending(true);
+
     try {
+      // Regenerate HL7 to ensure it matches selected target EMR format (e.g. Practice Fusion 2.5 vs standard 2.3)
+      let hl7ToSend = selected.hl7Content;
+      const genRes = await fetch("/api/generate-hl7", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parsedData: selected.parsedData,
+          saveToDb: true,
+          resultId: selected.id,
+          emrClientId: emrType,
+        }),
+      });
+      const genData = await genRes.json();
+      if (genRes.ok && genData.hl7Content) {
+        hl7ToSend = genData.hl7Content;
+      } else if (!genRes.ok) {
+        showToast(genData.error || "HL7 generation failed", "error");
+        setSending(false);
+        return;
+      }
+
       const res = await fetch("/api/send-hl7", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          hl7Content: selected.hl7Content,
+          hl7Content: hl7ToSend,
           emrType,
           fileName: `${selected.parsedData.patientLastName}_${selected.parsedData.patientFirstName}_HL7.txt`,
           parsedData: selected.parsedData,
@@ -327,10 +373,10 @@ export default function ResultsPage() {
 
   return (
     <>
-      <div className="page-header flex items-center justify-between">
+      <div className="page-header flex items-center justify-between flex-wrap gap-3">
         <div><h2>Review & Send Results</h2><p>Validate HL7 data against original PDF and push to EMR</p></div>
 
-        <div className="flex gap-3 items-center">
+        <div className="flex gap-3 items-center" style={{ flexShrink: 0 }}>
           <label className="form-label" style={{ margin: 0 }}>Target EMR:</label>
           <select className="form-select" style={{ width: 200 }} value={emrType} onChange={(e) => setEmrType(e.target.value)}>
             {emrClients.map(c => <option key={c.id} value={c.id}>{c.name} ({c.connectionType?.toUpperCase()})</option>)}
@@ -381,16 +427,31 @@ export default function ResultsPage() {
 
             {/* Detail */}
             {selected && (
-              <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <div className="flex items-center justify-between">
-                  <h3 style={{ fontSize: 18, fontWeight: 700 }}>
+              <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16, overflow: "hidden" }}>
+                <div
+                  className="flex items-center justify-between flex-wrap gap-3"
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    zIndex: 20,
+                    background: "var(--bg-secondary)",
+                    paddingTop: 4,
+                    paddingBottom: 14,
+                    borderBottom: "1px solid var(--border-color)",
+                  }}
+                >
+                  <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
                     {selected.parsedData.patientLastName || "Unknown"}, {selected.parsedData.patientFirstName || "Unknown"}
                   </h3>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-center flex-wrap" style={{ flexShrink: 0 }}>
                     <button className="btn btn-secondary" onClick={() => openPdfInNewTab(selected.parsedData.pdfBase64)}>
                       📄 View Original PDF
                     </button>
-                    {!editMode && <button className="btn btn-secondary" onClick={() => { startEdit(); setValidationErrors([]); setEditErrors({}); }}>✏️ Edit Data</button>}
+                    {!editMode && (
+                      <button className="btn btn-secondary" onClick={() => { startEdit(); setValidationErrors([]); setEditErrors({}); }}>
+                        ✏️ Edit Data
+                      </button>
+                    )}
                     {selected.status !== "sent" && (
                       <button className="btn btn-success" onClick={handleSend} disabled={sending}>
                         {sending ? "Sending..." : "🚀 Send to EMR"}
@@ -436,11 +497,12 @@ export default function ResultsPage() {
                           </div>
                           <div className="form-group w-full" style={{ gridColumn: "1/-1" }}>
                             <label className="form-label">Patient Gender <span style={{color:"var(--danger)"}}>*</span></label>
-                            <select className="form-select" value={editPatientGender} onChange={(e) => setEditPatientGender(e.target.value)}>
+                            <select className="form-select" style={editErrors.patientGender ? {borderColor:"var(--danger)"} : {}} value={editPatientGender} onChange={(e) => setEditPatientGender(e.target.value)}>
+                              <option value="">Select Gender...</option>
                               <option value="M">Male</option>
                               <option value="F">Female</option>
-                              <option value="U">Unknown</option>
                             </select>
+                            {editErrors.patientGender && <span style={{fontSize:11,color:"var(--danger)"}}>{editErrors.patientGender}</span>}
                           </div>
                           <div className="form-group" style={{gridColumn: "1/-1"}}>
                             <label className="form-label">Select Saved Physician</label>
