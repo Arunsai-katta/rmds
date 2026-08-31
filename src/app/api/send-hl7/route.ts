@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import SFTPClient from "ssh2-sftp-client";
 import dbConnect from "@/lib/dbConnect";
 import EMRClientModel from "@/lib/models/EMRClient";
@@ -45,13 +45,27 @@ async function apiSend(client: any, content: string): Promise<void> {
     .replace(/^\u000b/, "")
     .replace(/\u001c$/, "");
 
+  // Ensure MSH-10 Message Control ID is fresh and unique right before sending
+  const lines = cleaned.split(/\r\n|\r|\n/);
+  const updatedLines = lines.map((l) => {
+    if (l.startsWith("MSH|")) {
+      const parts = l.split("|");
+      if (parts.length >= 10) {
+        parts[9] = uuidv4(); // Fresh GUID for MSH-10 Message Control ID
+      }
+      return parts.join("|");
+    }
+    return l;
+  });
+  const finalPayload = updatedLines.join("\r\n");
+
   const res = await fetch(client.apiUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
       ...(client.authToken ? { Authorization: client.authToken } : {}),
     },
-    body: cleaned,
+    body: finalPayload,
   });
 
   if (!res.ok) {
@@ -59,12 +73,32 @@ async function apiSend(client: any, content: string): Promise<void> {
   }
 
   const responseText = await res.text();
-  const segments = responseText.split(/\r?\n/);
-  const msaSegment = segments.find((s) => s.startsWith("MSA"));
-  const errSegment = segments.find((s) => s.startsWith("ERR"));
+  console.log(`[send-hl7] EMR ACK Response:\n${responseText}`);
 
-  if (!msaSegment || errSegment) {
-    throw new Error(`EMR rejected the result${errSegment ? `: ${errSegment}` : ""}`);
+  // Split ACK response on \r\n, \r, or \n (HL7 standard uses \r segment terminators)
+  const segments = responseText.split(/\r\n|\r|\n/).map((s) => s.trim()).filter(Boolean);
+  const msaSegment = segments.find((s) => s.startsWith("MSA|"));
+  const errSegment = segments.find((s) => s.startsWith("ERR|"));
+
+  if (!msaSegment) {
+    throw new Error(`EMR response missing MSA segment: ${responseText}`);
+  }
+
+  const msaFields = msaSegment.split("|");
+  const ackCode = (msaFields[1] || "").toUpperCase();
+
+  // Success codes: CA (Commit Accept), AA (Application Accept)
+  const isSuccess = (ackCode === "CA" || ackCode === "AA") && !errSegment;
+
+  if (!isSuccess) {
+    let errorDetail = "";
+    if (errSegment) {
+      const errFields = errSegment.split("|");
+      errorDetail = errFields[7] || errFields[8] || errFields[3] || errSegment;
+    } else {
+      errorDetail = `MSA code: ${ackCode || "unknown"}`;
+    }
+    throw new Error(`EMR rejected result: ${errorDetail}`);
   }
 }
 
