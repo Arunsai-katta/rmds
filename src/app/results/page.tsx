@@ -7,7 +7,17 @@ function HL7Highlight({ content }: { content: string }) {
   if (!content) return null;
   const lines = content.split(/\r?\n/).filter(Boolean);
   return (
-    <div className="hl7-preview" style={{ height: "400px", overflowY: "auto" }}>
+    <div
+      className="hl7-preview"
+      style={{
+        maxHeight: "420px",
+        overflowY: "auto",
+        overflowX: "hidden",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-all",
+        overflowWrap: "anywhere",
+      }}
+    >
       {lines.map((line, i) => {
         let cls = "";
         if (line.startsWith("MSH")) cls = "seg-msh";
@@ -15,10 +25,22 @@ function HL7Highlight({ content }: { content: string }) {
         else if (line.startsWith("PV1")) cls = "seg-pv1";
         else if (line.startsWith("OBR")) cls = "seg-obr";
         else if (line.startsWith("OBX")) cls = "seg-obx";
-        const display = line.startsWith("OBX|2|ED") && line.length > 80
-          ? line.substring(0, 70) + "... [base64 data]"
-          : line;
-        return <div key={i} className={cls}>{display}</div>;
+
+        let display = line;
+        if ((line.startsWith("OBX|") || line.includes("Base64")) && line.length > 120) {
+          if (line.includes("^Base64^")) {
+            const idx = line.indexOf("^Base64^");
+            display = line.substring(0, idx + 8) + "... [base64 encoded PDF data]";
+          } else {
+            display = line.substring(0, 90) + "... [base64 encoded PDF data]";
+          }
+        }
+
+        return (
+          <div key={i} className={cls} style={{ wordBreak: "break-all", whiteSpace: "pre-wrap", marginBottom: 4 }}>
+            {display}
+          </div>
+        );
       })}
     </div>
   );
@@ -351,10 +373,10 @@ export default function ResultsPage() {
 
   return (
     <>
-      <div className="page-header flex items-center justify-between">
+      <div className="page-header flex items-center justify-between flex-wrap gap-3">
         <div><h2>Review & Send Results</h2><p>Validate HL7 data against original PDF and push to EMR</p></div>
 
-        <div className="flex gap-3 items-center">
+        <div className="flex gap-3 items-center" style={{ flexShrink: 0 }}>
           <label className="form-label" style={{ margin: 0 }}>Target EMR:</label>
           <select className="form-select" style={{ width: 200 }} value={emrType} onChange={(e) => setEmrType(e.target.value)}>
             {emrClients.map(c => <option key={c.id} value={c.id}>{c.name} ({c.connectionType?.toUpperCase()})</option>)}
@@ -405,16 +427,31 @@ export default function ResultsPage() {
 
             {/* Detail */}
             {selected && (
-              <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <div className="flex items-center justify-between">
-                  <h3 style={{ fontSize: 18, fontWeight: 700 }}>
+              <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16, overflow: "hidden" }}>
+                <div
+                  className="flex items-center justify-between flex-wrap gap-3"
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    zIndex: 20,
+                    background: "var(--bg-secondary)",
+                    paddingTop: 4,
+                    paddingBottom: 14,
+                    borderBottom: "1px solid var(--border-color)",
+                  }}
+                >
+                  <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
                     {selected.parsedData.patientLastName || "Unknown"}, {selected.parsedData.patientFirstName || "Unknown"}
                   </h3>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-center flex-wrap" style={{ flexShrink: 0 }}>
                     <button className="btn btn-secondary" onClick={() => openPdfInNewTab(selected.parsedData.pdfBase64)}>
                       📄 View Original PDF
                     </button>
-                    {!editMode && <button className="btn btn-secondary" onClick={() => { startEdit(); setValidationErrors([]); setEditErrors({}); }}>✏️ Edit Data</button>}
+                    {!editMode && (
+                      <button className="btn btn-secondary" onClick={() => { startEdit(); setValidationErrors([]); setEditErrors({}); }}>
+                        ✏️ Edit Data
+                      </button>
+                    )}
                     {selected.status !== "sent" && (
                       <button className="btn btn-success" onClick={handleSend} disabled={sending}>
                         {sending ? "Sending..." : "🚀 Send to EMR"}
